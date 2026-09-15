@@ -1,0 +1,4 @@
+Kenney Nature Kit assets
+License: Creative Commons CC0 1.0 Universal (public domain dedication)
+Source: https://kenney.nl/assets/nature-kit
+Included files: plant_bush.glb, plant_bushLarge.glb, tree_default.glb, tree_cone.glb, cliff_block_rock.glb
