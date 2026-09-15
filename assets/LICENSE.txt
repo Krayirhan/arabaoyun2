@@ -6,8 +6,4 @@ cloud.glb
 License: Creative Commons CC0 1.0 Universal (public domain dedication)
 Source: https://poly.pizza/m/KdFNOVn1Gf ("Cloud" by Quaternius)
 
-music/happy-adventure.mp3
-License: CC0
-Source: https://opengameart.org/content/happy-adventure-loop ("Happy Adventure (Loop)" by TinyWorlds)
-
 See also: kenney/LICENSE.txt for the tree and building assets.
