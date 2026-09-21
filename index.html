@@ -1,1 +1,78 @@
-<!doctype html><html lang="tr"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ejderha Uçuşu</title><style>.hidden{display:none!important}</style><script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js"}}</script><link rel="stylesheet" href="style.css"></head><body><div class="stage"><canvas id="game"></canvas><div class="hud-top"><div class="brand"><b>◆</b> EJDERHA UÇUŞU <span>3D</span><em>● GÖKYÜZÜ AÇIK</em></div><div class="stats"><div class="stat"><small>MESAFE</small><strong id="score">000000</strong><i>M</i></div><div class="stat center"><small>HIZ</small><strong id="speed">086</strong><i>KM/H</i></div><div class="stat right"><small>REKOR</small><strong id="best">000000</strong></div></div></div><div id="start" class="overlay"><div class="tag">SKY RUN / 01</div><h1>Dünyanın<br><i>üstünde.</i></h1><p>Ejderhanı uçur, gökdelenlerin ve bulutların arasından geç, binalara çarpma.</p><div class="speedmodes"><button class="mode-btn active" data-mult="1">NORMAL</button><button class="mode-btn" data-mult="2">2X HIZ</button></div><button id="startBtn">UÇUŞA BAŞLA <b>→</b></button><label><kbd>←</kbd><kbd>→</kbd> yön &nbsp; <kbd>↑</kbd><kbd>↓</kbd> yüksel / alçal</label></div><div id="over" class="overlay gone"><div class="tag red">UÇUŞ SONA ERDİ</div><h2>Bir kez daha?</h2><p>Mesafen: <strong id="final">0</strong> metre</p><button id="again">TEKRAR UÇ <b>↻</b></button></div><div class="hud-bottom"><span>◈ GÖKYÜZÜNDE UÇ</span><span>⌁ MOBİLDE KAYDIR</span><span>◉ ENGELLERDEN KAÇ</span></div></div><script type="module" src="game.js"></script></body></html>
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Ejderha Uçuşu</title>
+    <style>
+      .hidden {
+        display: none !important;
+      }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js"
+        }
+      }
+    </script>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="stage">
+      <canvas id="game"></canvas>
+      <div class="hud-top">
+        <div class="brand">
+          <b>◆</b> EJDERHA UÇUŞU <span>3D</span><em>● GÖKYÜZÜ AÇIK</em>
+        </div>
+        <div class="stats">
+          <div class="stat">
+            <small>MESAFE</small><strong id="score">000000</strong><i>M</i>
+          </div>
+          <div class="stat center">
+            <small>HIZ</small><strong id="speed">086</strong><i>KM/H</i>
+          </div>
+          <div class="stat right">
+            <small>GÜN REKORU</small><strong id="best">000000</strong>
+          </div>
+          <div class="stat coin-stat">
+            <small>COIN</small><strong id="coins">000</strong>
+          </div>
+        </div>
+      </div>
+      <div class="mission-panel">
+        <small>GÜNLÜK GÖREVLER</small>
+        <strong id="mission">COIN 0/10 · UÇUŞ 0/500 · GEÇİŞ 0/3</strong>
+        <em id="powerStatus">GÜÇLENDİRİCİ YOK</em>
+      </div>
+      <div id="start" class="overlay">
+        <div class="tag">SKY RUN / 01</div>
+        <h1>Dünyanın<br /><i>üstünde.</i></h1>
+        <p>
+          Ejderhanı uçur, gökdelenlerin ve bulutların arasından geç, binalara
+          çarpma.
+        </p>
+        <div class="speedmodes">
+          <button class="mode-btn active" data-mult="1">NORMAL</button
+          ><button class="mode-btn" data-mult="2">2X HIZ</button>
+        </div>
+        <button id="startBtn">UÇUŞA BAŞLA <b>→</b></button
+        ><label
+          ><kbd>←</kbd><kbd>→</kbd> yön &nbsp; <kbd>↑</kbd><kbd>↓</kbd> yüksel /
+          alçal</label
+        >
+      </div>
+      <div id="over" class="overlay gone">
+        <div class="tag red">UÇUŞ SONA ERDİ</div>
+        <h2>Bir kez daha?</h2>
+        <p>Mesafen: <strong id="final">0</strong> metre</p>
+        <button id="again">TEKRAR UÇ <b>↻</b></button>
+      </div>
+      <div class="hud-bottom">
+        <span>◈ GÖKYÜZÜNDE UÇ</span><span>⌁ MOBİLDE KAYDIR</span
+        ><span>◉ ENGELLERDEN KAÇ</span>
+      </div>
+    </div>
+    <script type="module" src="game.js"></script>
+  </body>
+</html>

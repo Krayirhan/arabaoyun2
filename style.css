@@ -20,6 +20,11 @@ html,body{margin:0;height:100%;overflow:hidden;background:#04060b;color:var(--in
 .stat.center{text-align:center}
 .stat.center strong{color:var(--cyan)}
 .stat.right{text-align:right}
+.stat.coin-stat strong{color:#ffd36a}
+.mission-panel{position:absolute;top:82px;left:20px;z-index:4;display:flex;flex-direction:column;gap:5px;padding:8px 11px;border:1px solid #ffffff1c;border-radius:8px;background:#0d1423b8;backdrop-filter:blur(10px);font:9px 'Space Mono';letter-spacing:.06em;pointer-events:none}
+.mission-panel small{color:var(--cyan);font-size:8px}
+.mission-panel strong{color:var(--ink);font-size:10px;font-weight:400}
+.mission-panel em{color:#ffd36a;font-style:normal;font-size:8px}
 
 .overlay{position:absolute;inset:0;z-index:3;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:0 20px;background:radial-gradient(ellipse at 50% 45%,#050913e0 0%,#050913b3 45%,#050913f0 100%)}
 .gone{display:none}
@@ -53,4 +58,6 @@ h2{font-size:clamp(42px,7vw,70px)}
 .stat i{display:none}
 .hud-bottom{padding:10px 12px;font-size:8px}
 .hud-bottom span:nth-child(2){display:none}
+.mission-panel{top:72px;left:10px;right:10px;padding:6px 8px;font-size:8px}
+.mission-panel strong{font-size:8px;white-space:nowrap}
 }
