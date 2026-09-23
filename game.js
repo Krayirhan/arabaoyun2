@@ -29,7 +29,8 @@ const c = document.querySelector("#game"),
   feedbackEl = document.querySelector("#feedback"),
   start = document.querySelector("#start"),
   over = document.querySelector("#over"),
-  finalEl = document.querySelector("#final");
+  finalEl = document.querySelector("#final"),
+  finalDistanceEl = document.querySelector("#finalDistance");
 let s,
   cam,
   r,
@@ -58,6 +59,7 @@ let s,
   tY = 0,
   spawnTimer = 0,
   patternIndex = 0,
+  spawnCount = 0,
   coinsCollected = 0,
   coinPoints = 0,
   gameTime = 0,
@@ -70,10 +72,16 @@ let s,
   comboTimer = 0,
   nightMode = false,
   lowQuality = innerWidth < 700,
-  dailyId = new Date().toISOString().slice(0, 10),
+  assetsReady = false,
+  feedbackTimeout = 0,
+  dailyId = localDateId(new Date()),
   dailyBestKey = `ejderha-daily-best-${dailyId}`,
   best = +localStorage.getItem(dailyBestKey) || 0,
   key = {};
+function localDateId(date) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
 bestEl.textContent = String(best).padStart(6, "0");
 if (coinsEl) coinsEl.textContent = "000";
 window.addEventListener("asseterror", (event) => {
@@ -92,10 +100,10 @@ function showStartupError(error) {
   }
 }
 window.addEventListener("error", (event) => {
-  if (!run) showStartupError(event.error || event.message);
+  if (!assetsReady) showStartupError(event.error || event.message);
 });
 window.addEventListener("unhandledrejection", (event) => {
-  if (!run) showStartupError(event.reason);
+  if (!assetsReady) showStartupError(event.reason);
 });
 const missionKey = `ejderha-missions-${dailyId}`;
 let missionState;
@@ -134,7 +142,11 @@ function showFeedback(text, variant = "") {
   if (!feedbackEl) return;
   feedbackEl.textContent = text;
   feedbackEl.className = `feedback ${variant}`;
-  window.setTimeout(() => feedbackEl.classList.add("gone"), 800);
+  window.clearTimeout(feedbackTimeout);
+  feedbackTimeout = window.setTimeout(
+    () => feedbackEl.classList.add("gone"),
+    800,
+  );
 }
 function setPaused(value) {
   if (!run) return;
@@ -144,27 +156,17 @@ function setPaused(value) {
   if (!paused) clock.start();
 }
 function applyNightLighting(root, active) {
-  root.traverse(
-    (part) => {
-      if (!part.isMesh) return;
-      const materials = Array.isArray(part.material)
-        ? part.material
-        : [part.material];
-      materials.forEach((material) => {
-        if (!material.emissive) return;
-        material.emissive.set(active ? 5401247 : 0);
-        material.emissiveIntensity = active ? 0.38 : 0;
-      });
-    },
-    void 0,
-    (error) => {
-      window.dispatchEvent(
-        new CustomEvent("asseterror", {
-          detail: { path: "assets/dragon.glb", error },
-        }),
-      );
-    },
-  );
+  root.traverse((part) => {
+    if (!part.isMesh) return;
+    const materials = Array.isArray(part.material)
+      ? part.material
+      : [part.material];
+    materials.forEach((material) => {
+      if (!material.emissive) return;
+      material.emissive.set(active ? 5401247 : 0);
+      material.emissiveIntensity = active ? 0.38 : 0;
+    });
+  });
 }
 function toggleAtmosphere() {
   nightMode = !nightMode;
@@ -190,6 +192,13 @@ function toggleQuality() {
   lowQuality = !lowQuality;
   r.setPixelRatio(lowQuality ? 1 : Math.min(devicePixelRatio, 2));
   r.shadowMap.enabled = !lowQuality;
+  // Shader programs bake in the shadow setting, so force a recompile.
+  s.traverse((o) => {
+    if (!o.material) return;
+    (Array.isArray(o.material) ? o.material : [o.material]).forEach(
+      (m) => (m.needsUpdate = true),
+    );
+  });
   qualityBtn.textContent = lowQuality ? "HD" : "D\xDC\u015E\xDCK";
   showFeedback(
     lowQuality ? "MOB\u0130L KAL\u0130TE" : "Y\xDCKSEK KAL\u0130TE",
@@ -413,6 +422,7 @@ function seedCityProps() {
 function resize() {
   let w = stage.clientWidth,
     h = stage.clientHeight;
+  if (!w || !h) return;
   cam.aspect = w / h;
   cam.updateProjectionMatrix();
   r.setSize(w, h, false);
@@ -472,7 +482,37 @@ function buildRoad() {
   road.position.z = -1400;
   s.add(road);
 }
+function trackAssetLoading() {
+  // Every GLTFLoader/TextureLoader here uses the default manager. A glTF can
+  // queue its .bin/.png only after the .gltf itself finishes, so onLoad may
+  // fire briefly before the real end; re-check after a short delay.
+  const manager = THREE.DefaultLoadingManager;
+  const progressEl = loadingEl?.querySelector("span");
+  let loaded = 0,
+    total = 0,
+    settleTimer = 0;
+  const finish = () => {
+    if (assetsReady) return;
+    assetsReady = true;
+    loadingEl?.classList.add("gone");
+  };
+  manager.onProgress = (_url, itemsLoaded, itemsTotal) => {
+    loaded = itemsLoaded;
+    total = itemsTotal;
+    if (progressEl && !assetsReady)
+      progressEl.textContent = `Varlıklar yükleniyor... ${itemsLoaded}/${itemsTotal}`;
+  };
+  manager.onLoad = () => {
+    window.clearTimeout(settleTimer);
+    settleTimer = window.setTimeout(() => {
+      if (loaded >= total) finish();
+    }, 200);
+  };
+  // Never leave the player stuck on the loading screen if a request hangs.
+  window.setTimeout(finish, 20000);
+}
 function build() {
+  trackAssetLoading();
   s = new THREE.Scene();
   s.background = new THREE.Color(7973311);
   s.fog = new THREE.Fog(7973311, 65, 260);
@@ -483,7 +523,7 @@ function build() {
   r.setSize(stage.clientWidth, stage.clientHeight, false);
   r.toneMapping = THREE.ACESFilmicToneMapping;
   r.toneMappingExposure = 1.15;
-  r.shadowMap.enabled = true;
+  r.shadowMap.enabled = !lowQuality;
   r.shadowMap.type = THREE.PCFSoftShadowMap;
   s.add(new THREE.HemisphereLight(12574975, 2896980, 1.8));
   sun = new THREE.DirectionalLight(16764830, 3);
@@ -533,7 +573,7 @@ function build() {
   if (qualityBtn)
     qualityBtn.textContent = lowQuality ? "HD" : "D\xDC\u015E\xDCK";
   resize();
-  window.setTimeout(() => loadingEl?.classList.add("gone"), 1400);
+  new ResizeObserver(resize).observe(stage);
 }
 const DRAG_HX = DRAGON_COLLIDER.x,
   DRAG_HY = DRAGON_COLLIDER.y,
@@ -585,12 +625,15 @@ function addPowerup(kind, x, y, z) {
   group.rotation.y = kind === "magnet" ? Math.PI / 2 : 0;
   group.userData.kind = kind;
   group.userData.baseY = y;
-  group.userData.phase = patternIndex;
+  group.userData.phase = spawnCount;
   powerups.push(group);
   s.add(group);
 }
 function spawnObstaclePattern() {
   if (!buildingTpls.length) return;
+  // Random pattern, but never the same one twice in a row.
+  const nextIndex = Math.floor(Math.random() * (OBSTACLE_PATTERNS.length - 1));
+  patternIndex = nextIndex >= patternIndex ? nextIndex + 1 : nextIndex;
   const pattern = OBSTACLE_PATTERNS[patternIndex];
   const baseZ = dragon.position.z - 150;
   pattern.forEach(({ lane, offset = 0 }, index) => {
@@ -603,22 +646,22 @@ function spawnObstaclePattern() {
   const blocked = new Set(pattern.map(({ lane }) => lane));
   const safeLanes = [-2, -1, 0, 1, 2].filter((lane) => !blocked.has(lane));
   if (safeLanes.length) {
-    const lane = safeLanes[Math.floor(safeLanes.length / 2)];
+    const lane = safeLanes[Math.floor(Math.random() * safeLanes.length)];
     for (let index = 0; index < 2; index += 1) {
       addCoin(
         lane * LANE_WIDTH,
         6.5,
         baseZ - 15 - index * 18,
-        patternIndex + index,
+        spawnCount + index,
       );
     }
-    if (patternIndex % 4 === 1) {
+    if (spawnCount % 4 === 1) {
       addPowerup("magnet", lane * LANE_WIDTH, 7.2, baseZ - 62);
-    } else if (patternIndex % 4 === 3) {
+    } else if (spawnCount % 4 === 3) {
       addPowerup("shield", lane * LANE_WIDTH, 7.2, baseZ - 62);
     }
   }
-  patternIndex = (patternIndex + 1) % OBSTACLE_PATTERNS.length;
+  spawnCount += 1;
 }
 function addCloud() {
   let g = cloudTpl ? cloudTpl.clone(true) : new THREE.Group();
@@ -658,9 +701,14 @@ function end() {
   localStorage.setItem(missionKey, JSON.stringify(missionState));
   let n = Math.floor(score);
   finalEl.textContent = n;
+  if (finalDistanceEl) finalDistanceEl.textContent = Math.floor(runDistance);
   best = Math.max(best, n);
   localStorage.setItem(dailyBestKey, best);
   bestEl.textContent = String(best).padStart(6, "0");
+  // This run is now folded into missionState; don't count it twice.
+  coinsCollected = 0;
+  runDistance = 0;
+  passedBuildings = 0;
   updateMissionUI();
   over.classList.remove("gone", "hidden");
 }
@@ -675,7 +723,8 @@ function begin() {
   velX = 0;
   velY = 0;
   spawnTimer = 0;
-  patternIndex = 0;
+  patternIndex = Math.floor(Math.random() * OBSTACLE_PATTERNS.length);
+  spawnCount = 0;
   coinsCollected = 0;
   coinPoints = 0;
   gameTime = 0;
@@ -713,228 +762,242 @@ function begin() {
   over.classList.add("gone", "hidden");
   clock.start();
 }
+// Simulate in small fixed steps so low frame rates neither slow the game down
+// nor let the dragon tunnel through a building between two frames.
+const MAX_STEP = 1 / 60;
+const MAX_FRAME = 0.25;
+// Must match the lane marker spacing in buildRoad().
+const ROAD_MARK_SPACING = 28;
+// A building only counts as "passed" if the dragon flew this close beside it.
+const PASS_COUNT_GAP = 8;
 let clock = new THREE.Clock();
-function loop() {
-  requestAnimationFrame(loop);
-  let dt = Math.min(clock.getDelta(), 0.04);
-  if (run && !paused) {
-    gameTime += dt;
-    runDistance += speed * dt;
-    magnetTimer = Math.max(0, magnetTimer - dt);
-    shieldTimer = Math.max(0, shieldTimer - dt);
-    comboTimer = Math.max(0, comboTimer - dt);
-    if (comboTimer === 0 && combo !== 1) {
-      combo = 1;
+function step(dt) {
+  gameTime += dt;
+  runDistance += speed * dt;
+  magnetTimer = Math.max(0, magnetTimer - dt);
+  shieldTimer = Math.max(0, shieldTimer - dt);
+  comboTimer = Math.max(0, comboTimer - dt);
+  if (comboTimer === 0 && combo !== 1) {
+    combo = 1;
+    updateComboUI();
+  }
+  let kx = (key.ArrowRight ? 1 : 0) - (key.ArrowLeft ? 1 : 0),
+    ky = (key.ArrowUp ? 1 : 0) - (key.ArrowDown ? 1 : 0);
+  let x = THREE.MathUtils.clamp(kx + tX, -1, 1),
+    y = THREE.MathUtils.clamp(ky + tY, -1, 1);
+  velX = THREE.MathUtils.lerp(velX, x * 22, dt * 6);
+  velY = THREE.MathUtils.lerp(velY, y * 9, dt * 6);
+  dragon.position.x = THREE.MathUtils.clamp(
+    dragon.position.x + velX * dt,
+    -42,
+    42,
+  );
+  dragon.position.y = THREE.MathUtils.clamp(
+    dragon.position.y + velY * dt,
+    1,
+    17,
+  );
+  // The world stands still and only the dragon moves, so every piece of
+  // scenery scrolls past at the same rate.
+  dragon.position.z -= (2 * speed + 5) * dt;
+  dragon.rotation.z = THREE.MathUtils.lerp(
+    dragon.rotation.z,
+    -x * 0.11,
+    dt * 7,
+  );
+  dragon.rotation.x = THREE.MathUtils.lerp(dragon.rotation.x, y * 0.07, dt * 7);
+  cam.rotation.z = THREE.MathUtils.lerp(cam.rotation.z, -x * 0.045, dt * 5);
+  cam.rotation.y = THREE.MathUtils.lerp(cam.rotation.y, x * 0.025, dt * 5);
+  if (mixer) {
+    mixer.timeScale = 1.15 + Math.min(0.45, speed / MAX_SPD);
+    mixer.update(dt);
+  }
+  cam.fov = THREE.MathUtils.lerp(
+    cam.fov,
+    BASE_FOV +
+      Math.min(14, ((speed - baseSpeed) / (maxSpeed - baseSpeed)) * 14),
+    dt * 3,
+  );
+  score += dt * speed * 0.7;
+  // Speed ramps with distance flown, not with bonus points.
+  speed = Math.min(maxSpeed, baseSpeed + (runDistance / 570) * speedMult);
+  spawnTimer -= dt;
+  if (spawnTimer <= 0) {
+    spawnObstaclePattern();
+    spawnTimer = Math.max(0.9, 1.45 - Math.min(0.4, runDistance / 8500));
+  }
+  if (Math.random() < dt * 0.4) addCloud();
+  recycleTrees();
+  if (ground) ground.position.z = dragon.position.z - 1400;
+  if (road)
+    road.position.z =
+      Math.round((dragon.position.z - 1400) / ROAD_MARK_SPACING) *
+      ROAD_MARK_SPACING;
+  if (sun) {
+    sun.position.set(
+      dragon.position.x - 25,
+      dragon.position.y + 45,
+      dragon.position.z + 15,
+    );
+    sun.target.position.copy(dragon.position);
+  }
+  buildings.forEach((o) => {
+    const lateralGap =
+      Math.abs(o.userData.cx - dragon.position.x) - o.userData.hx - DRAG_HX;
+    const depthGap =
+      Math.abs(o.userData.cz - dragon.position.z) - o.userData.hz - DRAG_HZ;
+    const verticalGap =
+      Math.abs(o.userData.cy - dragon.position.y) - o.userData.hy - DRAG_HY;
+    if (
+      !o.userData.nearMissAwarded &&
+      lateralGap > 0 &&
+      lateralGap < 4 &&
+      depthGap < 2 &&
+      verticalGap < 2
+    ) {
+      o.userData.nearMissAwarded = true;
+      const nearMissReward = 40 * combo;
+      combo = Math.min(5, combo + 1);
+      comboTimer = 3;
+      score += nearMissReward;
+      showFeedback("YAKIN GE\xC7İŞ", "danger");
       updateComboUI();
     }
-    updatePowerUI();
-    let kx = (key.ArrowRight ? 1 : 0) - (key.ArrowLeft ? 1 : 0),
-      ky = (key.ArrowUp ? 1 : 0) - (key.ArrowDown ? 1 : 0);
-    let x = THREE.MathUtils.clamp(kx + tX, -1, 1),
-      y = THREE.MathUtils.clamp(ky + tY, -1, 1);
-    velX = THREE.MathUtils.lerp(velX, x * 22, dt * 6);
-    velY = THREE.MathUtils.lerp(velY, y * 9, dt * 6);
-    dragon.position.x = THREE.MathUtils.clamp(
-      dragon.position.x + velX * dt,
-      -42,
-      42,
-    );
-    dragon.position.y = THREE.MathUtils.clamp(
-      dragon.position.y + velY * dt,
-      1,
-      17,
-    );
-    dragon.position.z -= speed * dt;
-    dragon.rotation.z = THREE.MathUtils.lerp(
-      dragon.rotation.z,
-      -x * 0.11,
-      dt * 7,
-    );
-    dragon.rotation.x = THREE.MathUtils.lerp(
-      dragon.rotation.x,
-      y * 0.07,
-      dt * 7,
-    );
-    cam.rotation.z = THREE.MathUtils.lerp(cam.rotation.z, -x * 0.045, dt * 5);
-    cam.rotation.y = THREE.MathUtils.lerp(cam.rotation.y, x * 0.025, dt * 5);
-    if (mixer) {
-      mixer.timeScale = 1.15 + Math.min(0.45, speed / MAX_SPD);
-      mixer.update(dt);
+    if (
+      !o.userData.passed &&
+      o.userData.cz - o.userData.hz > dragon.position.z + DRAG_HZ
+    ) {
+      o.userData.passed = true;
+      if (lateralGap < PASS_COUNT_GAP && verticalGap < 0) passedBuildings += 1;
     }
-    cam.fov = THREE.MathUtils.lerp(
-      cam.fov,
-      BASE_FOV +
-        Math.min(14, ((speed - baseSpeed) / (maxSpeed - baseSpeed)) * 14),
-      dt * 3,
-    );
-    cam.updateProjectionMatrix();
-    score += dt * speed * 0.7;
-    speed = Math.min(maxSpeed, baseSpeed + (score / 400) * speedMult);
-    spawnTimer -= dt;
-    if (spawnTimer <= 0) {
-      spawnObstaclePattern();
-      spawnTimer = Math.max(0.9, 1.45 - Math.min(0.4, score / 6e3));
+  });
+  buildings = buildings.filter((o) => {
+    if (o.position.z > dragon.position.z + 25) {
+      s.remove(o);
+      return false;
     }
-    if (Math.random() < dt * 0.4) addCloud();
-    recycleTrees();
-    if (ground) ground.position.z = dragon.position.z - 1400;
-    if (road) road.position.z = dragon.position.z - 1400;
-    if (sun) {
-      sun.position.set(
-        dragon.position.x - 25,
-        dragon.position.y + 45,
-        dragon.position.z + 15,
+    return true;
+  });
+  if (buildings.length > 18) {
+    const oldest = buildings.shift();
+    s.remove(oldest);
+  }
+  cityProps.forEach((o) => {
+    // Street furniture is fixed to the ground; only cars drive.
+    if (o.userData.kind === "car")
+      o.position.z += (speed + 5) * dt * (o.userData.speedFactor - 1);
+    if (o.position.z > dragon.position.z + 35) {
+      o.position.z -= 2600;
+    }
+  });
+  coins.forEach((coin) => {
+    if (magnetTimer > 0 && Math.abs(coin.position.z - dragon.position.z) < 80) {
+      coin.position.x = THREE.MathUtils.lerp(
+        coin.position.x,
+        dragon.position.x,
+        dt * 5,
       );
-      sun.target.position.copy(dragon.position);
+      // Pull the bob centre, otherwise the bob below overwrites the pull.
+      coin.userData.baseY = THREE.MathUtils.lerp(
+        coin.userData.baseY,
+        dragon.position.y,
+        dt * 5,
+      );
     }
-    buildings.forEach((o) => {
-      const dz = (speed + 5) * dt;
-      o.position.z += dz;
-      o.userData.cz += dz;
-      const lateralGap =
-        Math.abs(o.userData.cx - dragon.position.x) - o.userData.hx - DRAG_HX;
-      const depthGap =
-        Math.abs(o.userData.cz - dragon.position.z) - o.userData.hz - DRAG_HZ;
-      const verticalGap =
-        Math.abs(o.userData.cy - dragon.position.y) - o.userData.hy - DRAG_HY;
-      if (
-        !o.userData.nearMissAwarded &&
-        lateralGap > 0 &&
-        lateralGap < 4 &&
-        depthGap < 2 &&
-        verticalGap < 2
-      ) {
-        o.userData.nearMissAwarded = true;
-        const nearMissReward = 40 * combo;
-        combo = Math.min(5, combo + 1);
-        comboTimer = 3;
-        score += nearMissReward;
-        showFeedback("YAKIN GE\xC7\u0130\u015E", "danger");
-        updateComboUI();
-      }
-    });
-    buildings = buildings.filter((o) => {
-      if (o.position.z > dragon.position.z + 25) {
-        passedBuildings += 1;
-        s.remove(o);
-        return false;
-      }
-      return true;
-    });
-    if (buildings.length > 18) {
-      const oldest = buildings.shift();
-      s.remove(oldest);
+    coin.rotation.y += dt * 4;
+    coin.position.y =
+      coin.userData.baseY + Math.sin(gameTime * 4 + coin.userData.phase) * 0.45;
+  });
+  coins = coins.filter((coin) => {
+    const collected =
+      Math.abs(coin.position.x - dragon.position.x) < coin.userData.radius &&
+      Math.abs(coin.position.y - dragon.position.y) < 3.6 &&
+      Math.abs(coin.position.z - dragon.position.z) < 4.5;
+    if (collected) {
+      coinsCollected += 1;
+      coinPoints += 25;
+      const coinReward = 25 * combo;
+      score += coinReward;
+      combo = Math.min(5, combo + 1);
+      comboTimer = 3;
+      showFeedback("+25 COIN", "coin");
+      updateComboUI();
+      if (coinsEl) coinsEl.textContent = String(coinPoints).padStart(3, "0");
+      recycleCoin(coin);
+      return false;
     }
-    cityProps.forEach((o) => {
-      o.position.z += (speed + 5) * dt * o.userData.speedFactor;
-      if (o.position.z > dragon.position.z + 35) {
-        o.position.z -= 2600;
+    if (coin.position.z > dragon.position.z + 35) {
+      recycleCoin(coin);
+      return false;
+    }
+    return true;
+  });
+  powerups.forEach((powerup) => {
+    powerup.rotation.y += dt * 2.5;
+    powerup.position.y =
+      powerup.userData.baseY +
+      Math.sin(gameTime * 3 + powerup.userData.phase) * 0.5;
+  });
+  powerups = powerups.filter((powerup) => {
+    const collected =
+      Math.abs(powerup.position.x - dragon.position.x) < 3.8 &&
+      Math.abs(powerup.position.y - dragon.position.y) < 3.8 &&
+      Math.abs(powerup.position.z - dragon.position.z) < 4.5;
+    if (collected) {
+      if (powerup.userData.kind === "magnet") {
+        magnetTimer = 10;
+        showFeedback("MANYET AKTİF", "coin");
       }
-    });
-    coins.forEach((coin) => {
-      const dz = (speed + 5) * dt;
-      coin.position.z += dz;
-      if (
-        magnetTimer > 0 &&
-        Math.abs(coin.position.z - dragon.position.z) < 80
-      ) {
-        coin.position.x = THREE.MathUtils.lerp(
-          coin.position.x,
-          dragon.position.x,
-          dt * 5,
-        );
-        coin.position.y = THREE.MathUtils.lerp(
-          coin.position.y,
-          dragon.position.y,
-          dt * 5,
-        );
+      if (powerup.userData.kind === "shield") {
+        shieldTimer = 10;
+        showFeedback("KALKAN AKTİF", "coin");
       }
-      coin.rotation.y += dt * 4;
-      coin.position.y =
-        coin.userData.baseY +
-        Math.sin(gameTime * 4 + coin.userData.phase) * 0.45;
-    });
-    coins = coins.filter((coin) => {
-      const collected =
-        Math.abs(coin.position.x - dragon.position.x) < coin.userData.radius &&
-        Math.abs(coin.position.y - dragon.position.y) < 3.6 &&
-        Math.abs(coin.position.z - dragon.position.z) < 4.5;
-      if (collected) {
-        coinsCollected += 1;
-        coinPoints += 25;
-        const coinReward = 25 * combo;
-        score += coinReward;
-        combo = Math.min(5, combo + 1);
-        comboTimer = 3;
-        showFeedback("+25 COIN", "coin");
-        updateComboUI();
-        if (coinsEl) coinsEl.textContent = String(coinPoints).padStart(3, "0");
-        recycleCoin(coin);
-        return false;
-      }
-      if (coin.position.z > dragon.position.z + 35) {
-        recycleCoin(coin);
-        return false;
-      }
-      return true;
-    });
-    powerups.forEach((powerup) => {
-      const dz = (speed + 5) * dt;
-      powerup.position.z += dz;
-      powerup.rotation.y += dt * 2.5;
-      powerup.position.y =
-        powerup.userData.baseY +
-        Math.sin(gameTime * 3 + powerup.userData.phase) * 0.5;
-    });
-    powerups = powerups.filter((powerup) => {
-      const collected =
-        Math.abs(powerup.position.x - dragon.position.x) < 3.8 &&
-        Math.abs(powerup.position.y - dragon.position.y) < 3.8 &&
-        Math.abs(powerup.position.z - dragon.position.z) < 4.5;
-      if (collected) {
-        if (powerup.userData.kind === "magnet") {
-          magnetTimer = 10;
-          showFeedback("MANYET AKT\u0130F", "coin");
-        }
-        if (powerup.userData.kind === "shield") {
-          shieldTimer = 10;
-          showFeedback("KALKAN AKT\u0130F", "coin");
-        }
-        updatePowerUI();
-        s.remove(powerup);
-        return false;
-      }
-      if (powerup.position.z > dragon.position.z + 35) {
-        s.remove(powerup);
-        return false;
-      }
-      return true;
-    });
+      s.remove(powerup);
+      return false;
+    }
+    if (powerup.position.z > dragon.position.z + 35) {
+      s.remove(powerup);
+      return false;
+    }
+    return true;
+  });
+  // Clouds drift forward a little so they read as far away (parallax).
+  clouds.forEach((o) => (o.position.z -= (speed * 0.4 + 2) * dt));
+  clouds = clouds.filter((o) => {
+    if (o.position.z > dragon.position.z + 40) {
+      s.remove(o);
+      return false;
+    }
+    return true;
+  });
+  const hitBuilding = buildings.find(
+    (o) =>
+      Math.abs(o.userData.cz - dragon.position.z) < o.userData.hz + DRAG_HZ &&
+      Math.abs(o.userData.cx - dragon.position.x) < o.userData.hx + DRAG_HX &&
+      Math.abs(o.userData.cy - dragon.position.y) < o.userData.hy + DRAG_HY,
+  );
+  if (hitBuilding) {
+    if (shieldTimer > 0) {
+      s.remove(hitBuilding);
+      buildings = buildings.filter((o) => o !== hitBuilding);
+      shieldTimer = 0;
+    } else {
+      end();
+    }
+  }
+}
+function loop() {
+  requestAnimationFrame(loop);
+  let remaining = Math.min(clock.getDelta(), MAX_FRAME);
+  if (run && !paused) {
+    while (remaining > 0 && run) {
+      const dt = Math.min(MAX_STEP, remaining);
+      remaining -= dt;
+      step(dt);
+    }
+    cam.updateProjectionMatrix();
+    updatePowerUI();
     updateMissionUI();
-    clouds.forEach((o) => (o.position.z += (speed * 0.6 + 3) * dt));
-    clouds = clouds.filter((o) => {
-      if (o.position.z > dragon.position.z + 40) {
-        s.remove(o);
-        return false;
-      }
-      return true;
-    });
-    const hitBuilding = buildings.find(
-      (o) =>
-        Math.abs(o.userData.cz - dragon.position.z) < o.userData.hz + DRAG_HZ &&
-        Math.abs(o.userData.cx - dragon.position.x) < o.userData.hx + DRAG_HX &&
-        Math.abs(o.userData.cy - dragon.position.y) < o.userData.hy + DRAG_HY,
-    );
-    if (hitBuilding) {
-      if (shieldTimer > 0) {
-        s.remove(hitBuilding);
-        buildings = buildings.filter((o) => o !== hitBuilding);
-        shieldTimer = 0;
-        updatePowerUI();
-      } else {
-        end();
-      }
-    }
     scoreEl.textContent = String(Math.floor(score)).padStart(6, "0");
     speedEl.textContent = String(Math.floor(speed * 5)).padStart(3, "0");
   }
@@ -963,6 +1026,9 @@ addEventListener("keydown", (e) => {
   if (e.key === " " && !run) begin();
 });
 addEventListener("keyup", (e) => (key[e.code] = false));
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && run && !paused) setPaused(true);
+});
 let touchId = null,
   touchX = 0,
   touchY = 0;
