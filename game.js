@@ -57,6 +57,9 @@ const c = document.querySelector("#game"),
   quitBtn = document.querySelector("#quitBtn"),
   freePanel = document.querySelector("#freePanel"),
   humanBtn = document.querySelector("#humanBtn"),
+  hudBtn = document.querySelector("#hudBtn"),
+  settingsBtn = document.querySelector("#settingsBtn"),
+  settingsMenu = document.querySelector("#settingsMenu"),
   throttleEl = document.querySelector("#throttle"),
   pauseOverlay = document.querySelector("#pauseOverlay"),
   atmosphereBtn = document.querySelector("#atmosphereBtn"),
@@ -1843,17 +1846,36 @@ function loop() {
 startBtn.onclick = begin;
 document.querySelector("#again").onclick = begin;
 pauseBtn?.addEventListener("click", () => setPaused(!paused));
-hudBtn?.addEventListener("click", () => {
-  const hidden = stage.classList.toggle("hud-min");
-  hudBtn.classList.toggle("on", hidden);
-  hudBtn.setAttribute("aria-pressed", String(hidden));
-  hudBtn.textContent = hidden ? "◉" : "👁";
-});
 resumeBtn?.addEventListener("click", () => setPaused(false));
 quitBtn?.addEventListener("click", () => {
   if (run) end(false);
 });
 humanBtn?.addEventListener("click", () => setHumanMode(!humanMode));
+// Hide everything that isn't needed to play (U key or the eye button).
+function toggleHud() {
+  const hidden = stage.classList.toggle("hud-min");
+  if (!hudBtn) return;
+  hudBtn.classList.toggle("on", hidden);
+  hudBtn.setAttribute("aria-pressed", String(hidden));
+  hudBtn.textContent = hidden ? "◉" : "👁";
+}
+hudBtn?.addEventListener("click", toggleHud);
+settingsBtn?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const open = settingsMenu.classList.toggle("gone") === false;
+  settingsBtn.classList.toggle("on", open);
+});
+// Close the settings menu on any click outside it.
+addEventListener("click", (e) => {
+  if (!settingsMenu || settingsMenu.classList.contains("gone") || settingsMenu.contains(e.target)) return;
+  settingsMenu.classList.add("gone");
+  settingsBtn.classList.remove("on");
+});
+document.querySelectorAll(".panel-head").forEach((head) =>
+  head.addEventListener("click", () => head.parentElement.classList.toggle("collapsed")),
+);
+// Small screens start with both side panels folded to their headers.
+if (innerWidth < 700) document.querySelectorAll(".mission-panel, .free-panel").forEach((p) => p.classList.add("collapsed"));
 freePanel?.querySelectorAll("[data-throttle]").forEach((b) =>
   b.addEventListener("click", () => changeThrottle(+b.dataset.throttle)),
 );
@@ -1914,6 +1936,7 @@ addEventListener("keydown", (e) => {
     else fire();
   }
   if (e.code === "KeyH") setHumanMode(!humanMode);
+  if (e.code === "KeyU") toggleHud();
   if (e.code === "KeyZ") changeThrottle(-1);
   if (e.code === "KeyX") changeThrottle(1);
   const digit = /^Digit([1-9])$/.exec(e.code);
