@@ -6,12 +6,16 @@ import { readFileSync, writeFileSync, readdirSync, mkdirSync } from "node:fs";
 import { inflateSync } from "node:zlib";
 import { join } from "node:path";
 
-const [mainPath, landmarkPath, extraPath, terrainDir] = process.argv.slice(2);
+const [mainPath, landmarkPath, extraPath, terrainDir, treesPath] = process.argv.slice(2);
 if (!terrainDir) {
-  console.error("usage: node tools/build-ankara.mjs <main.json> <landmarks.json> <extra.json> <terrain-dir>");
+  console.error(
+    "usage: node tools/build-ankara.mjs <main.json> <landmarks.json> <extra.json> <terrain-dir> [trees.json]",
+  );
   process.exit(1);
 }
-const elements = [mainPath, landmarkPath, extraPath].flatMap((p) => JSON.parse(readFileSync(p, "utf8")).elements);
+const elements = [mainPath, landmarkPath, extraPath, treesPath]
+  .filter(Boolean)
+  .flatMap((p) => JSON.parse(readFileSync(p, "utf8")).elements);
 // The same way can arrive from several queries.
 const unique = new Map();
 for (const e of elements) unique.set(`${e.type}${e.id}`, e);
@@ -312,6 +316,34 @@ function kindOf(t, h) {
   return h > 45 ? 1 : 0;
 }
 const ROOF_SHAPE = { dome: 1, pyramidal: 2, cone: 2, onion: 1 };
+// Facade styles, matching the texture atlas cells in the game:
+// 0 apartment with ground-floor shops, 1 glass office, 2 plain/industrial,
+// 3 stone public building, 6 apartment without shops (decided later from
+// distance to main roads).
+const STYLE_GLASS = new Set(["office", "commercial", "hotel", "bank"]);
+const STYLE_PLAIN = new Set([
+  "industrial",
+  "warehouse",
+  "garage",
+  "garages",
+  "service",
+  "shed",
+  "train_station",
+  "construction",
+  "school",
+  "hospital",
+  "university",
+  "kindergarten",
+  "roof",
+  "parking",
+]);
+const STYLE_STONE = new Set(["government", "public", "civic", "mosque", "church", "museum"]);
+function styleOf(t, h) {
+  if (t.historic || t.tourism || t.memorial || STYLE_STONE.has(t.building)) return 3;
+  if (STYLE_GLASS.has(t.building) || h > 45) return 1;
+  if (STYLE_PLAIN.has(t.building)) return 2;
+  return 0;
+}
 
 const parts = [];
 for (const e of partFeatures) {
@@ -335,6 +367,7 @@ function emit(e, rings, h, minH, tags) {
     roofColour: colourOf(tags["roof:colour"]),
     roof: ROOF_SHAPE[rs] || 0,
     roofH: num(tags["roof:height"]) || 0,
+    style: styleOf(tags, h),
   });
 }
 for (const e of buildingFeatures) {
@@ -389,6 +422,7 @@ areas.sort((a, b) => ringArea(b[1][0]) - ringArea(a[1][0]));
 
 // ---------------------------------------------------------------- roads
 const ROAD_WIDTH = { motorway: 24, trunk: 22, primary: 18, secondary: 14, tertiary: 11, residential: 7 };
+const ROAD_CLASS = { motorway: 0, trunk: 0, primary: 1, secondary: 2, tertiary: 3, residential: 4 };
 const roads = [];
 for (const e of all) {
   const t = e.tags || {};
@@ -401,7 +435,64 @@ for (const e of all) {
     flat.push(Math.round(x * Q), Math.round(z * Q));
   }
   const w = num(t.width) || ROAD_WIDTH[t.highway] * (t.oneway === "yes" ? 0.6 : 1);
-  roads.push([Math.round(w * Q), flat]);
+  // [width, points, class (0 motorway/trunk .. 4 residential), oneway]
+  roads.push([Math.round(w * Q), flat, ROAD_CLASS[t.highway], t.oneway === "yes" ? 1 : 0]);
+}
+
+// Apartments that front a main street get shops on the ground floor, as
+// along Atatürk Bulvarı; quieter streets keep plain ground floors.
+const SHOP_DISTANCE = 15 * Q;
+const roadGrid = new Map();
+const RG = 50 * Q;
+for (const [, flat, cls] of roads) {
+  if (cls > 3) continue;
+  for (let i = 0; i + 3 < flat.length; i += 2) {
+    const key = `${Math.floor(flat[i] / RG)},${Math.floor(flat[i + 1] / RG)}`;
+    if (!roadGrid.has(key)) roadGrid.set(key, []);
+    roadGrid.get(key).push([flat[i], flat[i + 1], flat[i + 2], flat[i + 3]]);
+  }
+}
+const segDist = (px, pz, [ax, az, bx, bz]) => {
+  const dx = bx - ax,
+    dz = bz - az;
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (pz - az) * dz) / (dx * dx + dz * dz || 1)));
+  return Math.hypot(px - ax - t * dx, pz - az - t * dz);
+};
+function frontsMainRoad(ring) {
+  for (let i = 0; i < ring.length; i += 2) {
+    const gx = Math.floor(ring[i] / RG),
+      gz = Math.floor(ring[i + 1] / RG);
+    for (let dx = -1; dx <= 1; dx++)
+      for (let dz = -1; dz <= 1; dz++)
+        for (const s of roadGrid.get(`${gx + dx},${gz + dz}`) || [])
+          if (segDist(ring[i], ring[i + 1], s) < SHOP_DISTANCE) return true;
+  }
+  return false;
+}
+let shopFronts = 0;
+for (const b of buildings) {
+  if (b.style !== 0) continue;
+  if (frontsMainRoad(b.rings[0])) shopFronts += 1;
+  else b.style = 6;
+}
+
+// ---------------------------------------------------------------- trees
+// Individually mapped trees and tree rows. Parks, forests and street trees
+// are scattered in the game on top of these, since OSM maps few of them.
+const treePoints = [];
+const treeRows = [];
+for (const e of all) {
+  if (e.tags?.natural === "tree" && e.type === "node") {
+    const [x, z] = toXZ(e);
+    treePoints.push(Math.round(x * Q), Math.round(z * Q));
+  } else if (e.tags?.natural === "tree_row" && e.geometry) {
+    const flat = [];
+    for (const g of e.geometry) {
+      const [x, z] = toXZ(g);
+      flat.push(Math.round(x * Q), Math.round(z * Q));
+    }
+    treeRows.push(flat);
+  }
 }
 
 // ---------------------------------------------------------------- heightmap
@@ -459,6 +550,7 @@ const outBuildings = buildings.map((b) => {
     b.roof,
     Math.round(b.roofH * Q),
     b.rings,
+    b.style,
   ];
 });
 
@@ -503,6 +595,7 @@ const out = {
   buildings: outBuildings,
   areas,
   roads,
+  trees: { points: treePoints, rows: treeRows },
   landmarks,
 };
 mkdirSync("assets/ankara", { recursive: true });
@@ -511,7 +604,7 @@ writeFileSync("assets/ankara/ankara.json", json);
 const hs = outBuildings.map((b) => (b[2] - b[1]) / Q);
 console.log(
   `buildings ${outBuildings.length} (parts ${parts.length}, outlines replaced by parts ${skippedOutlines}), ` +
-    `areas ${areas.length}, roads ${roads.length}, landmarks ${landmarks.length}, ` +
+    `areas ${areas.length}, roads ${roads.length}, shop fronts ${shopFronts}, trees ${treePoints.length / 2} + ${treeRows.length} rows, landmarks ${landmarks.length}, ` +
     `heightmap ${hw}x${hh} (${missing} cells without data), ${(json.length / 1024).toFixed(0)} KB`,
 );
 console.log(

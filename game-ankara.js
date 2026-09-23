@@ -1,5 +1,6 @@
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js";
 import { groundAt } from "./game-ankara-worker.js";
+import { createFacadeMaterial, addGroundDetail, buildTrees, cullTrees, Traffic, Birds } from "./game-ankara-scenery.js";
 
 // Free-flight Ankara level built from OpenStreetMap buildings and AWS terrain
 // tiles (assets/ankara, produced by tools/build-ankara.mjs). Units are metres
@@ -11,29 +12,6 @@ const ROUTE = ["KIZILAY", "GÜVENPARK", "TBMM", "KUĞULU PARK", "ATAKULE", "KOCA
 const GATE_RADIUS = 16;
 const AREA_COLOURS = ["#86a862", "#557f43", "#5f8fb9", "#8ea676"];
 const GROUND_COLOUR = "#b8ad97";
-
-function windowTextures() {
-  const make = (lit) => {
-    const c = document.createElement("canvas");
-    c.width = c.height = 64;
-    const g = c.getContext("2d");
-    g.fillStyle = lit ? "#000" : "#fff";
-    g.fillRect(0, 0, 64, 64);
-    // Windows stay clear of the 8 px border, which is the plain texel that
-    // roofs and roads sample (PLAIN_UV in the worker).
-    for (const x of [10, 36]) {
-      const on = !lit || Math.random() > 0.35;
-      g.fillStyle = lit ? (on ? "#ffd27a" : "#000") : "#6f7e90";
-      g.fillRect(x, 14, 18, 30);
-    }
-    const tex = new THREE.CanvasTexture(c);
-    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = 4;
-    return tex;
-  };
-  return { day: make(false), night: make(true) };
-}
 
 function label(text) {
   const c = document.createElement("canvas");
@@ -70,7 +48,7 @@ function inside(rings, x, z) {
   return hit;
 }
 
-function runWorker(url) {
+function runWorker(url, treeDensity) {
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL("./game-ankara-worker.js", import.meta.url), { type: "module" });
     worker.onmessage = ({ data }) => {
@@ -82,7 +60,7 @@ function runWorker(url) {
       worker.terminate();
       reject(e.error || new Error(e.message));
     };
-    worker.postMessage({ url: new URL(url, location.href).href });
+    worker.postMessage({ url: new URL(url, location.href).href, treeDensity });
   });
 }
 
@@ -98,32 +76,34 @@ export class Ankara {
     this.coinTemplate = null;
   }
 
-  async load(url, coinTemplate, { textureSize = 2048 } = {}) {
-    const data = await runWorker(url);
+  async load(url, coinTemplate, { textureSize = 2048, treeDensity = 1, carTemplates = [], carCount = 260 } = {}) {
+    const data = await runWorker(url, treeDensity);
     this.coinTemplate = coinTemplate;
     this.hm = data.heightmap;
     this.landmarks = data.landmarks;
-    const tex = windowTextures();
-    // One material for walls, roofs and roads: one draw call per chunk.
-    this.cityMat = new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      map: tex.day,
-      emissiveMap: tex.night,
-      emissive: 0x000000,
-      roughness: 0.85,
-    });
+    // One material for walls, roofs, roads and markings: one draw call per
+    // chunk. The facade style per vertex picks the atlas cell.
+    this.cityMat = createFacadeMaterial();
+    // Sky reflections on glass, but not so much ambient that shadows fade.
+    this.cityMat.envMapIntensity = 0.45;
     for (const c of data.chunks) {
       const geo = new THREE.BufferGeometry();
       geo.setAttribute("position", new THREE.BufferAttribute(c.position, 3));
       geo.setAttribute("normal", new THREE.BufferAttribute(c.normal, 3, true));
       geo.setAttribute("uv", new THREE.BufferAttribute(c.uv, 2));
       geo.setAttribute("color", new THREE.BufferAttribute(c.color, 3, true));
+      geo.setAttribute("style", new THREE.BufferAttribute(c.style, 1));
       geo.setIndex(new THREE.BufferAttribute(c.index, 1));
       geo.computeBoundingSphere();
       const mesh = new THREE.Mesh(geo, this.cityMat);
+      mesh.castShadow = mesh.receiveShadow = true;
       mesh.matrixAutoUpdate = false;
       this.group.add(mesh);
     }
+    const trees = buildTrees(this.group, data.trees);
+    this.treeCount = trees.total;
+    this.treeMeshes = trees.meshes;
+    if (carTemplates.length && data.traffic.length) this.traffic = new Traffic(this.group, data.traffic, carTemplates, carCount);
     this.colliders = data.colliders;
     this.colliders.forEach((b, id) => {
       for (let gx = Math.floor(b.bx0 / GRID); gx <= Math.floor(b.bx1 / GRID); gx++)
@@ -144,6 +124,7 @@ export class Ankara {
     this.buildTerrain(data.areas, textureSize);
     this.buildLandmarks();
     this.buildRoute();
+    this.birds = new Birds(this.group, this.landmarks, (x, z) => this.groundAt(x, z));
     this.ready = true;
   }
 
@@ -199,6 +180,8 @@ export class Ankara {
       polygonOffsetFactor: 2,
       polygonOffsetUnits: 2,
     });
+    addGroundDetail(terrainMat);
+    terrainMat.envMapIntensity = 0.3;
     // One index per 500 m block over the shared vertex buffer, so frustum
     // culling skips terrain behind the camera.
     const block = Math.round(CHUNK / hm.cell);
@@ -231,6 +214,7 @@ export class Ankara {
       for (const k of index) box.expandByPoint(p.fromArray(positions, k * 3));
       geo.boundingSphere = box.getBoundingSphere(new THREE.Sphere());
       const terrain = new THREE.Mesh(geo, terrainMat);
+      terrain.receiveShadow = true;
       terrain.matrixAutoUpdate = false;
       this.group.add(terrain);
     }
@@ -405,6 +389,13 @@ export class Ankara {
 
   nextTarget() {
     return this.route[this.nextIndex] || null;
+  }
+
+  // Ambient life: traffic and birds. Runs every frame while flying.
+  animate(dt, time, cameraPos) {
+    this.traffic?.update(dt);
+    this.birds?.update(time);
+    if (cameraPos && this.treeMeshes) cullTrees(this.treeMeshes, cameraPos);
   }
 
   setVisible(value) {

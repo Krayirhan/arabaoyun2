@@ -39,6 +39,7 @@ import {
 import { createDrone, animateDrone, DRONE_HALF, createRing, RING_RADIUS } from "./game-obstacles.js";
 import { wallet, saveWallet, applySkin, renderShop, magnetDuration, shieldDuration } from "./game-shop.js";
 import { Ankara } from "./game-ankara.js";
+import { Atmosphere } from "./game-ankara-atmos.js";
 const c = document.querySelector("#game"),
   stage = c.parentElement,
   scoreEl = document.querySelector("#score"),
@@ -92,6 +93,7 @@ let s,
   speedLines,
   ankara,
   ankaraArrow,
+  atmos,
   buildings = [],
   drones = [],
   rings = [],
@@ -131,7 +133,6 @@ let s,
   boostCooldown = 0,
   invulnTimer = 0,
   crashTimer = 0,
-  slowmoTimer = 0,
   timeScale = 1,
   lives = 0,
   biome = 0,
@@ -153,6 +154,7 @@ const freeRoam = () => world === "ankara-free";
 // Free-roam speed steps (Z / X), as multiples of ANKARA_SPEED.
 const THROTTLE_STEPS = [0.3, 0.6, 1, 1.5, 2.2];
 const CAM_BASE = new THREE.Vector3(0, 4.8, 10);
+const camWorld = new THREE.Vector3();
 function localDateId(date) {
   const pad = (n) => String(n).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
@@ -295,6 +297,7 @@ function toggleAtmosphere() {
   }
   cloudMat.color.set(nightMode ? 0x2a3350 : 0xffffff);
   ankara?.setNight(nightMode);
+  if (atmos?.active) atmos.setNight(nightMode);
 }
 function toggleQuality() {
   lowQuality = !lowQuality;
@@ -306,6 +309,10 @@ function toggleQuality() {
     (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => (m.needsUpdate = true));
   });
   resize();
+  if (atmos.active) {
+    atmos.enable({ lowQuality });
+    if (nightMode) atmos.setNight(true);
+  }
   qualityBtn.textContent = lowQuality ? "HD" : "D\xDCŞ\xDCK";
   showFeedback(lowQuality ? "MOBİL KALİTE" : "Y\xDCKSEK KALİTE", "coin");
 }
@@ -573,6 +580,7 @@ function resize() {
     composer.setPixelRatio(r.getPixelRatio());
     composer.setSize(w, h);
   }
+  atmos?.resize(w, h);
 }
 function recycleTrees() {
   trees.forEach((o) => {
@@ -725,6 +733,7 @@ function build() {
   ankaraArrow.visible = false;
   s.add(ankaraArrow);
   ankara = new Ankara(s);
+  atmos = new Atmosphere(r, s, cam, sun, hemi);
   setupComposer();
   pauseBtn?.classList.add("gone");
   if (qualityBtn) qualityBtn.textContent = lowQuality ? "HD" : "D\xDCŞ\xDCK";
@@ -881,11 +890,9 @@ function addCloud() {
 }
 const tmpColor = new THREE.Color();
 function applyBiomeColors(k, instant = false) {
-  if (nightMode) return;
-  const target =
-    inAnkara()
-      ? { fog: 0xc9d6df, ground: 5201737, sky: 0xbfdfff, skyGround: 0x5a5046, sun: 0xffe2bd }
-      : BIOMES[biome];
+  // Ankara's sky, fog and light come from the Atmosphere module.
+  if (nightMode || inAnkara()) return;
+  const target = BIOMES[biome];
   const t = instant ? 1 : k;
   s.fog.color.lerp(tmpColor.setHex(target.fog), t);
   ground.material.color.lerp(tmpColor.setHex(target.ground), t);
@@ -912,6 +919,15 @@ function setWorld(next) {
   sun.castShadow = endless;
   cam.updateProjectionMatrix();
   applyBiomeColors(1, true);
+  if (endless) {
+    atmos.disable();
+    // Ankara draws its own sky mesh and clears the background; put the
+    // endless city's skybox (or night colour) back.
+    s.background = nightMode ? new THREE.Color(528933) : skyTexture || new THREE.Color(7973311);
+  } else {
+    atmos.enable({ lowQuality });
+    if (nightMode) atmos.setNight(true);
+  }
 }
 let ankaraLoading = null;
 function ensureAnkara() {
@@ -922,7 +938,12 @@ function ensureAnkara() {
   const label = startBtn.innerHTML;
   startBtn.innerHTML = "ANKARA Y\xDCKLENİYOR...";
   ankaraLoading = ankara
-    .load("assets/ankara/ankara.json", coinTpl, { textureSize: lowQuality ? 1024 : 2048 })
+    .load("assets/ankara/ankara.json", coinTpl, {
+      textureSize: lowQuality ? 1024 : 2048,
+      treeDensity: lowQuality ? 0.5 : 1,
+      carTemplates: [cityTemplates.car, cityTemplates.taxi].filter(Boolean),
+      carCount: lowQuality ? 120 : 260,
+    })
     .then(() => {
       ankara.setNight(nightMode);
       return true;
@@ -1034,9 +1055,6 @@ function crash() {
   playDragon("death");
   pauseBtn?.classList.add("gone");
 }
-function slowmo(seconds) {
-  slowmoTimer = Math.max(slowmoTimer, seconds);
-}
 function end(completed = false) {
   run = false;
   paused = false;
@@ -1122,7 +1140,6 @@ async function begin() {
   boostCooldown = 0;
   invulnTimer = 0;
   crashTimer = 0;
-  slowmoTimer = 0;
   timeScale = 1;
   lives = wallet.lives;
   biome = 0;
@@ -1300,7 +1317,6 @@ function stepFlight(dt, x, y) {
       showFeedback(nearTop ? "\xDcSTTEN GE\xC7İŞ" : "YAKIN GE\xC7İŞ", "danger");
       updateComboUI();
       shake.add(0.35);
-      slowmo(0.28);
       audio.play("nearMiss");
       audio.buzz(15);
     }
@@ -1577,9 +1593,8 @@ function loop() {
   requestAnimationFrame(loop);
   const realDt = Math.min(clock.getDelta(), MAX_FRAME);
   if (run && !paused) {
-    // Near misses and crashes briefly slow time for impact.
-    slowmoTimer = Math.max(0, slowmoTimer - realDt);
-    const targetScale = crashTimer > 0 ? 0.35 : slowmoTimer > 0 ? 0.4 : 1;
+    // Crashes briefly slow time for impact.
+    const targetScale = crashTimer > 0 ? 0.35 : 1;
     timeScale = THREE.MathUtils.lerp(timeScale, targetScale, Math.min(1, realDt * 12));
     let remaining = realDt * timeScale;
     if (crashTimer > 0) crashStep(realDt);
@@ -1590,6 +1605,7 @@ function loop() {
         step(dt);
       }
     particles.update(realDt * timeScale);
+    if (inAnkara()) ankara.animate(realDt * timeScale, gameTime, cam.getWorldPosition(camWorld));
     const intensity =
       world === "endless"
         ? Math.max(0, (speed - baseSpeed) / Math.max(1, maxSpeed - baseSpeed)) * 0.5 + (boostTimer > 0 ? 0.8 : 0)
@@ -1608,8 +1624,12 @@ function loop() {
     particles.update(realDt);
     cam.position.copy(CAM_BASE).add(shake.update(realDt));
   }
+  if (atmos.active) {
+    atmos.update(dragon.position, heading);
+    atmos.render(lowQuality);
+  }
   // Bloom only pays off at night, and costs too much on low quality.
-  if (nightMode && !lowQuality) composer.render();
+  else if (nightMode && !lowQuality) composer.render();
   else r.render(s, cam);
 }
 startBtn.onclick = begin;
