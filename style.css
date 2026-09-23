@@ -77,3 +77,56 @@ h2{font-size:clamp(42px,7vw,70px)}
 .atmosphere-btn{top:72px;right:48px;padding:7px 6px;font-size:7px}
 .quality-btn{top:72px;right:91px;padding:7px 5px;font-size:7px}
 }
+
+.sound-btn{position:absolute;top:88px;right:180px;z-index:5;border:1px solid #ffffff24;border-radius:7px;background:#0d1423d9;color:#c3cede;padding:8px 9px;font:700 9px 'Space Mono';cursor:pointer;pointer-events:auto}
+.abilities{position:absolute;right:20px;bottom:52px;z-index:5;display:flex;gap:10px}
+.ability{--fill:100%;position:relative;overflow:hidden;width:78px;height:62px;border:1px solid #ffffff24;border-radius:10px;background:#0d1423d9;color:#8292aa;font:700 15px 'Barlow Condensed';letter-spacing:.1em;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;touch-action:none;user-select:none;-webkit-user-select:none}
+.ability:before{content:'';position:absolute;left:0;right:0;bottom:0;height:var(--fill);background:#5de1e61f;transition:height .1s linear;pointer-events:none}
+.ability small{font:8px 'Space Mono';letter-spacing:.06em;color:#5f6f86}
+.ability b{position:relative}
+.ability.ready{color:var(--ink);border-color:#5de1e680}
+.ability.ready:before{background:#5de1e633}
+#fireBtn.ready{border-color:#ff865899}
+#fireBtn.ready:before{background:#ff865833}
+.ability.active{color:#ffd36a;box-shadow:0 0 18px #ffd36a55}
+.osm-credit{position:absolute;left:20px;bottom:40px;z-index:4;font:9px 'Space Mono';color:#c3cede;text-shadow:0 1px 4px #000;pointer-events:none}
+.overlay .world-btn{border:1px solid #3a4d6a;background:transparent;color:#9aa9bd;padding:9px 18px;border-radius:5px;font:700 13px 'Barlow Condensed';letter-spacing:.1em;cursor:pointer;transition:.2s}
+.overlay .world-btn:hover{border-color:var(--orange);color:var(--ink)}
+.overlay .world-btn.active{background:var(--orange);border-color:var(--orange);color:#1a0c06}
+.overlay button:disabled{opacity:.55;cursor:wait;transform:none}
+.wallet-row{display:flex;align-items:center;gap:14px;margin-top:16px;font:11px 'Space Mono';color:#9aa9bd}
+.wallet-row strong{color:#ffd36a;font-size:14px}
+.overlay .ghost-btn{background:transparent;border:1px solid #ffd36a88;color:#ffd36a;padding:8px 14px;font-size:13px}
+.overlay .ghost-btn:hover{background:#ffd36a22;color:#ffe7a8}
+#over .ghost-btn{margin-top:12px}
+.wallet-gain{color:#ffd36a!important;margin-top:-14px!important}
+.overlay.shop{z-index:8;justify-content:flex-start;padding-top:40px;overflow-y:auto;background:#050913f2}
+.shop .wallet{font:12px 'Space Mono';color:#9aa9bd;margin-bottom:18px}
+.shop .wallet strong{color:#ffd36a;font-size:20px}
+.shop-cols{display:flex;gap:22px;flex-wrap:wrap;justify-content:center;max-width:760px}
+.shop section{flex:1;min-width:280px;text-align:left}
+.shop h3{font:700 14px 'Barlow Condensed';letter-spacing:.14em;color:var(--cyan);margin:0 0 8px}
+.shop ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.shop li{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid #ffffff17;border-radius:8px;background:#0d1423b3;font:700 14px 'Barlow Condensed';letter-spacing:.08em}
+.shop li span{flex:1;display:flex;flex-direction:column}
+.shop li small{font:9px 'Space Mono';letter-spacing:0;color:#8292aa;font-weight:400}
+.shop .swatch{width:18px;height:18px;border-radius:50%;border:2px solid #ffffff40}
+.shop .pips{display:flex;gap:3px}
+.shop .pips b{width:8px;height:8px;border-radius:2px;background:#26324a}
+.shop .pips b.on{background:var(--cyan)}
+.overlay.shop li button{padding:7px 10px;font-size:12px;min-width:104px;background:#26324a;color:var(--ink)}
+.overlay.shop li button.buy{background:#ffd36a;color:#1a1204}
+.overlay.shop li button:disabled{background:#1a2233;color:#5de1e6;opacity:1;cursor:default}
+.overlay .shop-close{margin:22px 0 30px;background:transparent;border:1px solid #3a4d6a;color:#c3cede}
+
+@media(max-width:600px){
+.sound-btn{top:72px;right:128px;padding:7px 5px;font-size:7px}
+.abilities{right:10px;bottom:40px;gap:8px}
+.ability{width:64px;height:54px;font-size:13px}
+.osm-credit{left:10px;bottom:34px;font-size:7px}
+.shop section{min-width:0}
+.mission-panel{top:124px}
+.pause-btn,.atmosphere-btn,.quality-btn,.sound-btn{top:88px}
+.ability small{display:none}
+.wallet-row{flex-wrap:wrap;justify-content:center}
+}

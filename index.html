@@ -55,6 +55,18 @@
       <button id="pauseBtn" class="pause-btn" aria-label="Oyunu duraklat">Ⅱ</button>
       <button id="atmosphereBtn" class="atmosphere-btn">GECE</button>
       <button id="qualityBtn" class="quality-btn">KALİTE</button>
+      <button id="soundBtn" class="sound-btn">SES</button>
+      <div class="abilities">
+        <button id="fireBtn" class="ability ready" aria-label="Ateş püskür">
+          <b>ATEŞ</b><small>F / BOŞLUK</small>
+        </button>
+        <button id="boostBtn" class="ability ready" aria-label="Hızlan">
+          <b>HIZ</b><small>SHIFT</small>
+        </button>
+      </div>
+      <div id="osmCredit" class="osm-credit gone">
+        Harita © OpenStreetMap katkıcıları (ODbL) · Arazi: AWS Terrain Tiles
+      </div>
       <div id="feedback" class="feedback gone"></div>
       <div id="start" class="overlay">
         <div class="tag">SKY RUN / 01</div>
@@ -63,25 +75,37 @@
           Ejderhanı uçur, gökdelenlerin ve bulutların arasından geç, binalara
           çarpma.
         </p>
+        <div class="speedmodes worlds">
+          <button class="world-btn active" data-world="endless">
+            SONSUZ ŞEHİR</button
+          ><button class="world-btn" data-world="ankara">ANKARA</button>
+        </div>
         <div class="speedmodes">
           <button class="mode-btn active" data-mult="1">NORMAL</button
           ><button class="mode-btn" data-mult="2">2X HIZ</button>
         </div>
-        <button id="startBtn">UÇUŞA BAŞLA <b>→</b></button
-        ><label
+        <button id="startBtn">UÇUŞA BAŞLA <b>→</b></button>
+        <div class="wallet-row">
+          <span>CÜZDAN <strong id="walletCoins">0000</strong> ◈</span>
+          <button class="shop-btn ghost-btn">MAĞAZA</button>
+        </div>
+        <label
           ><kbd>←</kbd><kbd>→</kbd> yön &nbsp; <kbd>↑</kbd><kbd>↓</kbd> yüksel /
-          alçal</label
+          alçal &nbsp; <kbd>F</kbd> ateş &nbsp; <kbd>SHIFT</kbd> hız</label
         >
       </div>
       <div id="over" class="overlay gone">
-        <div class="tag red">UÇUŞ SONA ERDİ</div>
-        <h2>Bir kez daha?</h2>
+        <div id="overTag" class="tag red">UÇUŞ SONA ERDİ</div>
+        <h2 id="overTitle">Bir kez daha?</h2>
         <p>
           Puanın: <strong id="final">0</strong> · Mesafe:
           <strong id="finalDistance">0</strong> m
         </p>
+        <p id="walletGain" class="wallet-gain"></p>
         <button id="again">TEKRAR UÇ <b>↻</b></button>
+        <button class="shop-btn ghost-btn">MAĞAZA</button>
       </div>
+      <div id="shop" class="overlay shop gone"></div>
       <div id="pauseOverlay" class="overlay gone">
         <div class="tag">OYUN DURAKLATILDI</div>
         <h2>Hazır mısın?</h2>
