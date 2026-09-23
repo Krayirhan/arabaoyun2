@@ -158,10 +158,19 @@ h2{font-size:clamp(42px,7vw,70px)}
 .free-panel.collapsed>:not(.panel-head):not(.human-btn){display:none}
 /* Hidden HUD: keep only what is needed to play. */
 .stage.hud-min .brand,.stage.hud-min .stats,.stage.hud-min .mission-panel,.stage.hud-min .free-panel,.stage.hud-min .hud-bottom{display:none}
-.stage.hud-min .hud-top{background:none}
+.stage.hud-min .hud-top{background:none;pointer-events:none}
+.stage.hud-min .top-actions{top:12px;right:12px}
+.stage.hud-min .top-actions #settingsBtn,.stage.hud-min .top-actions #pauseBtn{display:none}
+.stage.hud-min .abilities{right:20px;bottom:20px}
+.stage.hud-min .ability{width:68px;height:56px}
 
 @media(max-width:600px){
 .top-actions{top:88px;right:10px;gap:5px}
 .icon-btn{width:32px;height:30px;font-size:13px}
 .hud-bottom{display:none}
+.abilities{right:12px;bottom:12px;gap:8px}
+.ability{width:64px;height:54px}
+.stage.hud-min .top-actions{top:10px;right:10px}
+.stage.hud-min .abilities{right:12px;bottom:12px}
+.stage.hud-min .ability{width:58px;height:50px}
 }

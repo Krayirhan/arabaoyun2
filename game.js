@@ -1843,6 +1843,12 @@ function loop() {
 startBtn.onclick = begin;
 document.querySelector("#again").onclick = begin;
 pauseBtn?.addEventListener("click", () => setPaused(!paused));
+hudBtn?.addEventListener("click", () => {
+  const hidden = stage.classList.toggle("hud-min");
+  hudBtn.classList.toggle("on", hidden);
+  hudBtn.setAttribute("aria-pressed", String(hidden));
+  hudBtn.textContent = hidden ? "◉" : "👁";
+});
 resumeBtn?.addEventListener("click", () => setPaused(false));
 quitBtn?.addEventListener("click", () => {
   if (run) end(false);
