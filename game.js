@@ -52,6 +52,9 @@ const c = document.querySelector("#game"),
   loadingEl = document.querySelector("#loading"),
   pauseBtn = document.querySelector("#pauseBtn"),
   resumeBtn = document.querySelector("#resumeBtn"),
+  quitBtn = document.querySelector("#quitBtn"),
+  freePanel = document.querySelector("#freePanel"),
+  throttleEl = document.querySelector("#throttle"),
   pauseOverlay = document.querySelector("#pauseOverlay"),
   atmosphereBtn = document.querySelector("#atmosphereBtn"),
   qualityBtn = document.querySelector("#qualityBtn"),
@@ -99,6 +102,7 @@ let s,
   trees = [],
   clouds = [],
   world = "endless",
+  freeThrottle = 1,
   speedMult = 1,
   baseSpeed = BASE_SPD,
   maxSpeed = MAX_SPD,
@@ -143,6 +147,11 @@ let s,
   best = +localStorage.getItem(dailyBestKey) || 0,
   key = {};
 const shake = new Shake();
+// Worlds: "endless" city, "ankara" gate route, "ankara-free" free roam.
+const inAnkara = () => world !== "endless";
+const freeRoam = () => world === "ankara-free";
+// Free-roam speed steps (Z / X), as multiples of ANKARA_SPEED.
+const THROTTLE_STEPS = [0.3, 0.6, 1, 1.5, 2.2];
 const CAM_BASE = new THREE.Vector3(0, 4.8, 10);
 function localDateId(date) {
   const pad = (n) => String(n).padStart(2, "0");
@@ -184,6 +193,14 @@ missionState.buildings ??= 0;
 missionState.rewards ??= { coins: false, distance: false, buildings: false };
 function updateMissionUI() {
   if (!missionEl) return;
+  if (freeRoam() && run && ankara?.ready) {
+    const near = ankara.nearestLandmark(dragon.position);
+    missionTitleEl.textContent = "SERBEST UÇUŞ";
+    missionEl.textContent = `EN YAKIN: ${near.name}  ·  ${Math.round(near.distance)} m  ·  İRTİFA ${Math.round(
+      dragon.position.y - ankara.groundAt(dragon.position.x, dragon.position.z),
+    )} m`;
+    return;
+  }
   if (world === "ankara" && run && ankara?.ready) {
     const target = ankara.nextTarget();
     const dist = target ? Math.round(Math.hypot(target.x - dragon.position.x, target.z - dragon.position.z)) : 0;
@@ -866,7 +883,7 @@ const tmpColor = new THREE.Color();
 function applyBiomeColors(k, instant = false) {
   if (nightMode) return;
   const target =
-    world === "ankara"
+    inAnkara()
       ? { fog: 0xc9d6df, ground: 5201737, sky: 0xbfdfff, skyGround: 0x5a5046, sun: 0xffe2bd }
       : BIOMES[biome];
   const t = instant ? 1 : k;
@@ -883,7 +900,8 @@ function setWorld(next) {
   trees.forEach((o) => (o.visible = endless));
   cityProps.forEach((o) => (o.visible = endless));
   ankara.setVisible(!endless);
-  ankaraArrow.visible = !endless;
+  ankaraArrow.visible = world === "ankara";
+  freePanel?.classList.toggle("gone", !freeRoam());
   osmCreditEl?.classList.toggle("gone", endless);
   s.fog.near = endless ? 65 : 160;
   s.fog.far = endless ? 260 : 1000;
@@ -1047,17 +1065,22 @@ function end(completed = false) {
   let n = Math.floor(score);
   finalEl.textContent = n;
   if (finalDistanceEl) finalDistanceEl.textContent = Math.floor(runDistance);
-  best = Math.max(best, n);
-  localStorage.setItem(dailyBestKey, best);
+  // Free roam has no goal, so it must not be able to set the daily record.
+  if (!freeRoam()) {
+    best = Math.max(best, n);
+    localStorage.setItem(dailyBestKey, best);
+  }
   bestEl.textContent = String(best).padStart(6, "0");
   // Coin points go into the persistent wallet for the shop.
   wallet.coins += coinPoints;
   saveWallet();
   updateWalletUI();
   if (walletGainEl) walletGainEl.textContent = coinPoints ? `+${coinPoints} ◈ c\xFCzdana eklendi` : "";
-  if (overTagEl) overTagEl.textContent = completed ? "ROTA TAMAMLANDI" : "U\xC7UŞ SONA ERDİ";
-  overTagEl?.classList.toggle("red", !completed);
-  if (overTitleEl) overTitleEl.textContent = completed ? "Ankara fethedildi!" : "Bir kez daha?";
+  const free = freeRoam();
+  if (overTagEl) overTagEl.textContent = free ? "SERBEST UÇUŞ" : completed ? "ROTA TAMAMLANDI" : "UÇUŞ SONA ERDİ";
+  overTagEl?.classList.toggle("red", !completed && !free);
+  if (overTitleEl) overTitleEl.textContent = free ? "İyi gezintiler!" : completed ? "Ankara fethedildi!" : "Bir kez daha?";
+  freePanel?.classList.add("gone");
   // This run is now folded into missionState; don't count it twice.
   coinsCollected = 0;
   runDistance = 0;
@@ -1070,7 +1093,7 @@ async function begin() {
   if (starting || run) return;
   audio.unlockAudio();
   starting = true;
-  const ok = world !== "ankara" || (await ensureAnkara());
+  const ok = !inAnkara() || (await ensureAnkara());
   starting = false;
   if (!ok) return;
   shopEl?.classList.add("gone");
@@ -1144,13 +1167,16 @@ async function begin() {
     o.position.set(o.userData.baseX, 0, o.userData.baseZ);
     o.rotation.y = o.userData.baseRotY;
   });
-  if (world === "ankara") {
+  if (inAnkara()) {
     ankara.coinTemplate ??= coinTpl;
-    const spawn = ankara.reset();
+    const spawn = ankara.reset({ free: freeRoam() });
     dragon.position.set(spawn.x, spawn.y, spawn.z);
     heading = spawn.heading;
     dragon.rotation.y = heading;
-    showFeedback("KIZILAY'DAN KALKIŞ", "coin");
+    freeThrottle = 1;
+    updateThrottleUI();
+    buildFreePanel();
+    showFeedback(freeRoam() ? "SERBEST UÇUŞ" : "KIZILAY'DAN KALKIŞ", "coin");
   }
   start.classList.add("gone", "hidden");
   over.classList.add("gone", "hidden");
@@ -1411,7 +1437,7 @@ function stepFlight(dt, x, y) {
 }
 function stepAnkara(dt, x, y) {
   const boostK = boostTimer > 0 ? 1.7 : 1;
-  speed = ANKARA_SPEED * speedMult * boostK;
+  speed = ANKARA_SPEED * speedMult * boostK * (freeRoam() ? freeThrottle : 1);
   displaySpeed = speed * 3.6;
   heading -= x * 1.25 * dt;
   velY = THREE.MathUtils.lerp(velY, y * 18, dt * 4);
@@ -1464,12 +1490,63 @@ function stepAnkara(dt, x, y) {
     );
     ankaraArrow.lookAt(target.gate.position);
   }
-  if (ankara.collides(dragon.position)) hit(null);
+  if (ankara.collides(dragon.position)) {
+    if (freeRoam()) bounce();
+    else hit(null);
+  }
+}
+// Free roam: walls push the dragon back instead of ending the flight.
+function bounce() {
+  if (invulnTimer > 0) return;
+  dragon.position.x += Math.sin(heading) * 14;
+  dragon.position.z += Math.cos(heading) * 14;
+  dragon.position.y += 10;
+  heading += Math.PI * 0.35;
+  invulnTimer = 0.8;
+  shake.add(0.8);
+  particles.burst(dragon.position, 30, { speed: 10, life: 0.6, size: 2.2, colors: SHIELD_COLORS });
+  playDragon("hit");
+  audio.play("shield");
+  audio.buzz(40);
+  showFeedback("DİKKAT!", "danger");
+}
+function updateThrottleUI() {
+  if (throttleEl) throttleEl.textContent = `x${freeThrottle.toFixed(1)}`;
+}
+function changeThrottle(dir) {
+  if (!run || !freeRoam()) return;
+  const i = THROTTLE_STEPS.indexOf(freeThrottle);
+  freeThrottle = THROTTLE_STEPS[THREE.MathUtils.clamp(i + dir, 0, THROTTLE_STEPS.length - 1)];
+  updateThrottleUI();
+  showFeedback(`HIZ x${freeThrottle.toFixed(1)}`, "coin");
+}
+function teleport(name) {
+  if (!run || !freeRoam() || crashTimer > 0) return;
+  const pose = ankara.viewpoint(name);
+  dragon.position.set(pose.x, pose.y, pose.z);
+  heading = pose.heading;
+  dragon.rotation.set(0, heading, 0);
+  velY = 0;
+  invulnTimer = 1;
+  particles.burst(dragon.position, 40, { speed: 12, life: 0.7, size: 2.5, colors: RING_COLORS, spread: 4 });
+  audio.play("checkpoint");
+  showFeedback(name, "coin");
+}
+// One button per landmark, numbered to match the 1-7 keys.
+function buildFreePanel() {
+  const spots = freePanel?.querySelector(".free-spots");
+  if (!spots || spots.childElementCount || !ankara.landmarks) return;
+  ankara.landmarks.forEach((lm, i) => {
+    const btn = document.createElement("button");
+    btn.innerHTML = `<b>${i + 1}</b>${lm.name}`;
+    btn.addEventListener("click", () => teleport(lm.name));
+    spots.appendChild(btn);
+  });
 }
 function step(dt) {
   tickTimers(dt);
   const [x, y] = readInput();
-  if (world === "ankara") stepAnkara(dt, x, y);
+  if (inAnkara()) stepAnkara(dt, x, y);
   else stepFlight(dt, x, y);
   if (!run || crashTimer > 0) return;
   if (mixer) {
@@ -1539,6 +1616,12 @@ startBtn.onclick = begin;
 document.querySelector("#again").onclick = begin;
 pauseBtn?.addEventListener("click", () => setPaused(!paused));
 resumeBtn?.addEventListener("click", () => setPaused(false));
+quitBtn?.addEventListener("click", () => {
+  if (run) end(false);
+});
+freePanel?.querySelectorAll("[data-throttle]").forEach((b) =>
+  b.addEventListener("click", () => changeThrottle(+b.dataset.throttle)),
+);
 atmosphereBtn?.addEventListener("click", toggleAtmosphere);
 qualityBtn?.addEventListener("click", toggleQuality);
 soundBtn?.addEventListener("click", toggleSound);
@@ -1579,7 +1662,7 @@ document.querySelectorAll(".world-btn").forEach(
       b.classList.add("active");
       world = b.dataset.world;
       // Start fetching the map as soon as it is chosen.
-      if (world === "ankara") ensureAnkara();
+      if (inAnkara()) ensureAnkara();
     }),
 );
 addEventListener("keydown", (e) => {
@@ -1592,6 +1675,10 @@ addEventListener("keydown", (e) => {
     else fire();
   }
   if (e.code === "KeyF") fire();
+  if (e.code === "KeyZ") changeThrottle(-1);
+  if (e.code === "KeyX") changeThrottle(1);
+  const digit = /^Digit([1-9])$/.exec(e.code);
+  if (digit && freeRoam() && ankara.landmarks?.[digit[1] - 1]) teleport(ankara.landmarks[digit[1] - 1].name);
   if (e.code === "ShiftLeft" || e.code === "ShiftRight") boost();
 });
 addEventListener("keyup", (e) => (key[e.code] = false));

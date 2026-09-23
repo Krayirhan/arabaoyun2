@@ -349,8 +349,17 @@ export class Ankara {
     }
   }
 
-  // Starts a run: returns the spawn pose facing the first gate.
-  reset() {
+  // Starts a run: returns the spawn pose facing the first gate. Free roam
+  // has no gates or coins and starts over Kızılay looking up Atatürk Bulvarı.
+  reset({ free = false } = {}) {
+    if (free) {
+      this.nextIndex = this.route.length;
+      this.route.forEach((r) => (r.gate.visible = false));
+      this.coins = [];
+      this.coinMeshes?.forEach((m) => this.group.remove(m));
+      this.coinMeshes = [];
+      return this.viewpoint("KIZILAY");
+    }
     this.nextIndex = 1;
     this.route.forEach((r, i) => (r.gate.visible = i > 0));
     this.placeCoins();
@@ -362,6 +371,28 @@ export class Ankara {
       z: start.z,
       heading: Math.atan2(-(first.x - start.x), -(first.z - start.z)),
     };
+  }
+
+  // A pose 250 m south of a landmark, facing it, high enough to clear the
+  // blocks in between and see the whole building.
+  viewpoint(name) {
+    const lm = this.landmarks.find((l) => l.name === name) || this.landmarks[0];
+    const x = lm.x,
+      z = lm.z + 250;
+    const tall = this.topNear(lm.x, lm.z, 40) - this.groundAt(lm.x, lm.z);
+    const y = Math.max(this.groundAt(x, z) + 60, this.topNear(x, z, 120) + 20, this.groundAt(lm.x, lm.z) + tall * 0.7);
+    return { x, y, z, heading: 0 };
+  }
+
+  // Closest landmark to a point, for the free-roam HUD.
+  nearestLandmark(pos) {
+    let best = null,
+      bestD = Infinity;
+    for (const lm of this.landmarks) {
+      const d = Math.hypot(lm.x - pos.x, lm.z - pos.z);
+      if (d < bestD) (best = lm), (bestD = d);
+    }
+    return { name: best.name, distance: bestD };
   }
 
   get total() {
