@@ -40,6 +40,7 @@ import { createDrone, animateDrone, DRONE_HALF, createRing, RING_RADIUS } from "
 import { wallet, saveWallet, applySkin, renderShop, magnetDuration, shieldDuration } from "./game-shop.js";
 import { Ankara } from "./game-ankara.js";
 import { Atmosphere } from "./game-ankara-atmos.js";
+import { Walker } from "./game-human.js";
 const c = document.querySelector("#game"),
   stage = c.parentElement,
   scoreEl = document.querySelector("#score"),
@@ -55,6 +56,7 @@ const c = document.querySelector("#game"),
   resumeBtn = document.querySelector("#resumeBtn"),
   quitBtn = document.querySelector("#quitBtn"),
   freePanel = document.querySelector("#freePanel"),
+  humanBtn = document.querySelector("#humanBtn"),
   throttleEl = document.querySelector("#throttle"),
   pauseOverlay = document.querySelector("#pauseOverlay"),
   atmosphereBtn = document.querySelector("#atmosphereBtn"),
@@ -94,6 +96,9 @@ let s,
   ankara,
   ankaraArrow,
   atmos,
+  walker,
+  humanMode = false,
+  humanRun = false,
   buildings = [],
   drones = [],
   rings = [],
@@ -140,7 +145,10 @@ let s,
   combo = 1,
   comboTimer = 0,
   nightMode = false,
-  lowQuality = innerWidth < 700,
+  quality = loadQuality(),
+  lowQuality = quality === 0,
+  // Dynamic resolution: scales the pixel ratio when frames run long.
+  resScale = 1,
   assetsReady = false,
   feedbackTimeout = 0,
   dailyId = localDateId(new Date()),
@@ -154,7 +162,107 @@ const freeRoam = () => world === "ankara-free";
 // Free-roam speed steps (Z / X), as multiples of ANKARA_SPEED.
 const THROTTLE_STEPS = [0.3, 0.6, 1, 1.5, 2.2];
 const CAM_BASE = new THREE.Vector3(0, 4.8, 10);
+// Third-person camera offset; closer and lower while walking.
+const HUMAN_CAM = new THREE.Vector3(0, 2.5, 6.2);
+const camBase = CAM_BASE.clone();
+const camProbe = new THREE.Vector3();
+// Dynamic resolution: drop the pixel ratio in 10% steps while frames take
+// over 22 ms, and creep back up once they hold vsync again.
+let frameAvg = 16.7,
+  perfLast = performance.now(),
+  perfTimer = 0,
+  perfCalm = 0,
+  hudTimer = 0;
+function adaptResolution() {
+  const now = performance.now();
+  const gap = now - perfLast;
+  perfLast = now;
+  // Ignore pauses and tab switches.
+  if (!run || paused || gap > 250) return;
+  frameAvg += (gap - frameAvg) * 0.05;
+  perfTimer += gap;
+  if (perfTimer < 1000) return;
+  perfTimer = 0;
+  if (frameAvg > 22 && resScale > 0.6) {
+    resScale = Math.max(0.6, resScale - 0.1);
+    perfCalm = 0;
+    applyPixelRatio();
+  } else if (frameAvg < 17.5 && resScale < 1) {
+    if (++perfCalm >= 3) {
+      perfCalm = 0;
+      resScale = Math.min(1, resScale + 0.05);
+      applyPixelRatio();
+    }
+  } else perfCalm = 0;
+}
+// The Ankara shadow map is cached, so the player gets a soft blob shadow
+// instead of a real one (a cached map would freeze it in place).
+function blobTexture() {
+  const c = document.createElement("canvas");
+  c.width = c.height = 64;
+  const g = c.getContext("2d");
+  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, "rgba(0,0,0,0.9)");
+  grad.addColorStop(0.6, "rgba(0,0,0,0.45)");
+  grad.addColorStop(1, "rgba(0,0,0,0)");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
+}
+let blobShadow;
+function updateBlobShadow() {
+  const show = run && inAnkara() && ankara.ready;
+  blobShadow.visible = show;
+  if (!show) return;
+  const p = dragon.position;
+  const ground = ankara.surfaceAt(p.x, p.z);
+  const height = Math.max(0, p.y - ground);
+  const opacity = humanMode ? 0.5 : 0.45 * Math.max(0, 1 - height / 120);
+  blobShadow.material.opacity = opacity;
+  blobShadow.visible = opacity > 0.02;
+  blobShadow.position.set(p.x, ground + 0.06, p.z);
+  blobShadow.scale.setScalar((humanMode ? 1.1 : 7) * (1 + height / 80));
+}
+function setPlayerShadows(cast) {
+  for (const root of [dragonModel, walker?.group]) root?.traverse((o) => o.isMesh && (o.castShadow = cast));
+}
+// On foot, pull the camera in towards the walker's head whenever a building
+// or tree would sit between them (or swallow the camera).
+function fitHumanCamera() {
+  const len = HUMAN_CAM.length();
+  const sin = Math.sin(heading),
+    cos = Math.cos(heading);
+  let dist = len;
+  for (let d = 1.2; d <= len; d += 0.4) {
+    const k = d / len;
+    // Camera offset rotated by the heading, measured from head height.
+    const ox = HUMAN_CAM.z * k * sin,
+      oz = HUMAN_CAM.z * k * cos;
+    camProbe.set(dragon.position.x + ox, dragon.position.y + 1.6 + (HUMAN_CAM.y - 1.6) * k, dragon.position.z + oz);
+    if (ankara.occludes(camProbe)) {
+      dist = Math.max(1.2, d - 0.4);
+      break;
+    }
+  }
+  const k = dist / len;
+  camBase.set(0, 1.6 + (HUMAN_CAM.y - 1.6) * k, HUMAN_CAM.z * k);
+}
 const camWorld = new THREE.Vector3();
+// Quality presets. PC defaults to medium, phones to low; the choice is kept.
+// Measured at 1080p: GTAO ~10 ms, per-frame shadow redraw ~4 ms, post
+// chain ~2.6 ms, scene ~3 ms, so medium skips the post chain entirely.
+const QUALITY = [
+  { name: "DÜŞÜK", pixelRatio: 1, shadows: false, trees: 0.35, cars: 80, treeView: 320, texture: 1024 },
+  { name: "ORTA", pixelRatio: 1.25, shadows: true, trees: 0.6, cars: 160, treeView: 450, texture: 2048 },
+  { name: "YÜKSEK", pixelRatio: 1.5, shadows: true, trees: 1, cars: 260, treeView: 650, texture: 2048 },
+];
+function loadQuality() {
+  try {
+    const saved = localStorage.getItem("ejderha-quality");
+    if (saved !== null && QUALITY[+saved]) return +saved;
+  } catch {}
+  return innerWidth < 700 || matchMedia("(pointer: coarse)").matches ? 0 : 1;
+}
 function localDateId(date) {
   const pad = (n) => String(n).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
@@ -197,7 +305,7 @@ function updateMissionUI() {
   if (!missionEl) return;
   if (freeRoam() && run && ankara?.ready) {
     const near = ankara.nearestLandmark(dragon.position);
-    missionTitleEl.textContent = "SERBEST UÇUŞ";
+    missionTitleEl.textContent = humanMode ? "YÜRÜYÜŞ" : "SERBEST UÇUŞ";
     missionEl.textContent = `EN YAKIN: ${near.name}  ·  ${Math.round(near.distance)} m  ·  İRTİFA ${Math.round(
       dragon.position.y - ankara.groundAt(dragon.position.x, dragon.position.z),
     )} m`;
@@ -299,22 +407,33 @@ function toggleAtmosphere() {
   ankara?.setNight(nightMode);
   if (atmos?.active) atmos.setNight(nightMode);
 }
-function toggleQuality() {
-  lowQuality = !lowQuality;
-  r.setPixelRatio(lowQuality ? 1 : Math.min(devicePixelRatio, 2));
-  r.shadowMap.enabled = !lowQuality;
+function applyPixelRatio() {
+  r.setPixelRatio(Math.min(devicePixelRatio, QUALITY[quality].pixelRatio) * resScale);
+  resize();
+}
+function applyQuality() {
+  lowQuality = quality === 0;
+  resScale = 1;
+  r.shadowMap.enabled = QUALITY[quality].shadows;
   // Shader programs bake in the shadow setting, so force a recompile.
   s.traverse((o) => {
     if (!o.material) return;
     (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => (m.needsUpdate = true));
   });
-  resize();
+  applyPixelRatio();
   if (atmos.active) {
-    atmos.enable({ lowQuality });
+    atmos.enable({ quality });
     if (nightMode) atmos.setNight(true);
   }
-  qualityBtn.textContent = lowQuality ? "HD" : "D\xDCŞ\xDCK";
-  showFeedback(lowQuality ? "MOBİL KALİTE" : "Y\xDCKSEK KALİTE", "coin");
+  if (qualityBtn) qualityBtn.textContent = `KALİTE: ${QUALITY[quality].name}`;
+}
+function toggleQuality() {
+  quality = (quality + 1) % QUALITY.length;
+  try {
+    localStorage.setItem("ejderha-quality", String(quality));
+  } catch {}
+  applyQuality();
+  showFeedback(`KALİTE: ${QUALITY[quality].name}`, "coin");
 }
 function updateSoundButton() {
   if (soundBtn) soundBtn.textContent = audio.isMuted() ? "SESSİZ" : "SES";
@@ -672,12 +791,11 @@ function build() {
   s.fog = new THREE.Fog(7973311, 65, 260);
   cam = new THREE.PerspectiveCamera(62, 1, 0.1, 450);
   r = new THREE.WebGLRenderer({ canvas: c, antialias: true });
-  const pixelRatio = lowQuality ? 1 : Math.min(devicePixelRatio, 2);
-  r.setPixelRatio(pixelRatio);
+  r.setPixelRatio(Math.min(devicePixelRatio, QUALITY[quality].pixelRatio));
   r.setSize(stage.clientWidth, stage.clientHeight, false);
   r.toneMapping = THREE.ACESFilmicToneMapping;
   r.toneMappingExposure = 1.15;
-  r.shadowMap.enabled = !lowQuality;
+  r.shadowMap.enabled = QUALITY[quality].shadows;
   r.shadowMap.type = THREE.PCFSoftShadowMap;
   hemi = new THREE.HemisphereLight(12574975, 2896980, 1.8);
   s.add(hemi);
@@ -723,6 +841,8 @@ function build() {
   cam.rotation.set(-0.12, 0, 0);
   dragon.add(cam);
   loadDragonModel(dragon);
+  walker = new Walker(dragon);
+  walker.load("assets/human/rogue.glb");
   particles = new Particles(s);
   speedLines = new SpeedLines(dragon);
   ankaraArrow = new THREE.Mesh(
@@ -734,9 +854,22 @@ function build() {
   s.add(ankaraArrow);
   ankara = new Ankara(s);
   atmos = new Atmosphere(r, s, cam, sun, hemi);
+  blobShadow = new THREE.Mesh(
+    new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({
+      map: blobTexture(),
+      transparent: true,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
+    }),
+  );
+  blobShadow.visible = false;
+  s.add(blobShadow);
   setupComposer();
   pauseBtn?.classList.add("gone");
-  if (qualityBtn) qualityBtn.textContent = lowQuality ? "HD" : "D\xDCŞ\xDCK";
+  if (qualityBtn) qualityBtn.textContent = `KALİTE: ${QUALITY[quality].name}`;
   updateSoundButton();
   updateWalletUI();
   resize();
@@ -919,13 +1052,15 @@ function setWorld(next) {
   sun.castShadow = endless;
   cam.updateProjectionMatrix();
   applyBiomeColors(1, true);
+  // Cached Ankara shadows can't follow a moving player: use the blob there.
+  setPlayerShadows(endless);
   if (endless) {
     atmos.disable();
     // Ankara draws its own sky mesh and clears the background; put the
     // endless city's skybox (or night colour) back.
     s.background = nightMode ? new THREE.Color(528933) : skyTexture || new THREE.Color(7973311);
   } else {
-    atmos.enable({ lowQuality });
+    atmos.enable({ quality });
     if (nightMode) atmos.setNight(true);
   }
 }
@@ -939,10 +1074,11 @@ function ensureAnkara() {
   startBtn.innerHTML = "ANKARA Y\xDCKLENİYOR...";
   ankaraLoading = ankara
     .load("assets/ankara/ankara.json", coinTpl, {
-      textureSize: lowQuality ? 1024 : 2048,
-      treeDensity: lowQuality ? 0.5 : 1,
+      // Trees, cars and ground detail follow the quality at load time.
+      textureSize: QUALITY[quality].texture,
+      treeDensity: QUALITY[quality].trees,
       carTemplates: [cityTemplates.car, cityTemplates.taxi].filter(Boolean),
-      carCount: lowQuality ? 120 : 260,
+      carCount: QUALITY[quality].cars,
     })
     .then(() => {
       ankara.setNight(nightMode);
@@ -967,6 +1103,8 @@ function explode(position, big = false) {
   audio.play("explosion");
 }
 function fire() {
+  // On foot the ATEŞ button is ZIPLA (jump).
+  if (humanMode) return run && !paused && walker.jump();
   if (!run || paused || crashTimer > 0 || fireCooldown > 0) return;
   fireCooldown = FIRE_COOLDOWN;
   fireTimer = 0.55;
@@ -996,6 +1134,12 @@ function fire() {
   }, 180);
 }
 function boost() {
+  // On foot the HIZ button toggles running (Shift can also be held).
+  if (humanMode) {
+    humanRun = !humanRun;
+    showFeedback(humanRun ? "KOŞU" : "YÜRÜYÜŞ", "coin");
+    return;
+  }
   if (!run || paused || crashTimer > 0 || boostCooldown > 0) return;
   boostTimer = BOOST_DURATION;
   boostCooldown = BOOST_COOLDOWN;
@@ -1151,6 +1295,7 @@ async function begin() {
   updateMissionUI();
   updatePowerUI();
   updateComboUI();
+  setHumanMode(false);
   cam.fov = BASE_FOV;
   cam.position.copy(CAM_BASE);
   cam.rotation.set(-0.12, 0, 0);
@@ -1539,6 +1684,15 @@ function changeThrottle(dir) {
 function teleport(name) {
   if (!run || !freeRoam() || crashTimer > 0) return;
   const pose = ankara.viewpoint(name);
+  if (humanMode) {
+    // On foot: land on the ground in front of the landmark, facing it.
+    const lm = ankara.landmarks.find((l) => l.name === name);
+    const spot = ankara.findWalkable(lm.x, lm.z + 70);
+    pose.x = spot.x;
+    pose.z = spot.z;
+    pose.y = ankara.surfaceAt(spot.x, spot.z);
+    pose.heading = Math.atan2(-(lm.x - spot.x), -(lm.z - spot.z));
+  }
   dragon.position.set(pose.x, pose.y, pose.z);
   heading = pose.heading;
   dragon.rotation.set(0, heading, 0);
@@ -1559,9 +1713,55 @@ function buildFreePanel() {
     spots.appendChild(btn);
   });
 }
+function stepHuman(dt, x, y) {
+  const running = humanRun || key.ShiftLeft || key.ShiftRight;
+  heading = walker.update(dt, { forward: y, turn: x, run: running }, ankara, dragon.position, heading);
+  dragon.rotation.set(0, heading, 0);
+  speed = Math.abs(walker.speed);
+  displaySpeed = speed * 3.6;
+  runDistance += speed * dt;
+  cam.fov = THREE.MathUtils.lerp(cam.fov, BASE_FOV, dt * 3);
+}
+// Swap between flying the dragon and walking. Only in Ankara free roam:
+// the gate route and the endless city are about flying.
+function setHumanMode(on) {
+  if (on && (!run || !freeRoam() || !walker.ready || crashTimer > 0)) return;
+  if (on === humanMode) return;
+  humanMode = on;
+  humanRun = false;
+  walker.show(on);
+  if (dragonModel) dragonModel.visible = !on;
+  dragon.rotation.set(0, heading, 0);
+  if (on) {
+    // Land on the nearest free patch of ground below the dragon.
+    const spot = ankara.findWalkable(dragon.position.x, dragon.position.z);
+    dragon.position.set(spot.x, ankara.surfaceAt(spot.x, spot.z), spot.z);
+    camBase.copy(HUMAN_CAM);
+    cam.rotation.set(-0.16, 0, 0);
+    particles.burst(dragon.position.clone().setY(dragon.position.y + 1), 30, { speed: 6, life: 0.6, size: 1.2, colors: RING_COLORS, spread: 2 });
+    showFeedback("İNSAN MODU", "coin");
+  } else {
+    camBase.copy(CAM_BASE);
+    cam.rotation.set(-0.12, 0, 0);
+    if (run && freeRoam()) {
+      dragon.position.y += 8;
+      showFeedback("EJDERHA MODU", "coin");
+    }
+  }
+  ankaraArrow.visible = world === "ankara" && !on;
+  if (humanBtn) humanBtn.innerHTML = on ? "<b>H</b>EJDERHA MODU" : "<b>H</b>İNSAN MODU";
+  fireBtn.querySelector("b").textContent = on ? "ZIPLA" : "ATEŞ";
+  boostBtn.querySelector("b").textContent = on ? "KOŞ" : "HIZ";
+  fireBtn.querySelector("small").textContent = on ? "BOŞLUK" : "F / BOŞLUK";
+  boostBtn.querySelector("small").textContent = "SHIFT";
+}
 function step(dt) {
   tickTimers(dt);
   const [x, y] = readInput();
+  if (humanMode) {
+    stepHuman(dt, x, y);
+    return;
+  }
   if (inAnkara()) stepAnkara(dt, x, y);
   else stepFlight(dt, x, y);
   if (!run || crashTimer > 0) return;
@@ -1591,6 +1791,7 @@ function crashStep(dt) {
 }
 function loop() {
   requestAnimationFrame(loop);
+  adaptResolution();
   const realDt = Math.min(clock.getDelta(), MAX_FRAME);
   if (run && !paused) {
     // Crashes briefly slow time for impact.
@@ -1605,28 +1806,35 @@ function loop() {
         step(dt);
       }
     particles.update(realDt * timeScale);
-    if (inAnkara()) ankara.animate(realDt * timeScale, gameTime, cam.getWorldPosition(camWorld));
+    if (inAnkara()) ankara.animate(realDt * timeScale, gameTime, cam.getWorldPosition(camWorld), QUALITY[quality].treeView);
     const intensity =
       world === "endless"
         ? Math.max(0, (speed - baseSpeed) / Math.max(1, maxSpeed - baseSpeed)) * 0.5 + (boostTimer > 0 ? 0.8 : 0)
         : 0.2 + (boostTimer > 0 ? 0.8 : 0);
-    speedLines.update(realDt, world === "endless" ? 2 * speed + 5 : speed, crashTimer > 0 ? 0 : intensity);
-    if (crashTimer <= 0) audio.setWind(Math.min(1, intensity));
-    cam.position.copy(CAM_BASE).add(shake.update(realDt));
+    speedLines.update(realDt, world === "endless" ? 2 * speed + 5 : speed, crashTimer > 0 || humanMode ? 0 : intensity);
+    if (crashTimer <= 0) audio.setWind(humanMode ? 0 : Math.min(1, intensity));
+    if (humanMode) fitHumanCamera();
+    cam.position.copy(camBase).add(shake.update(realDt));
     cam.updateProjectionMatrix();
     applyBiomeColors(Math.min(1, realDt * 0.8));
-    updatePowerUI();
-    updateMissionUI();
-    updateAbilityUI();
-    scoreEl.textContent = String(Math.floor(score)).padStart(6, "0");
-    speedEl.textContent = String(Math.floor(displaySpeed)).padStart(3, "0");
+    updateBlobShadow();
+    // HUD text at ~10 Hz: rewriting DOM every frame forces style work.
+    hudTimer += realDt;
+    if (hudTimer > 0.1) {
+      hudTimer = 0;
+      updatePowerUI();
+      updateMissionUI();
+      updateAbilityUI();
+      scoreEl.textContent = String(Math.floor(score)).padStart(6, "0");
+      speedEl.textContent = String(Math.floor(displaySpeed)).padStart(3, "0");
+    }
   } else if (!run) {
     particles.update(realDt);
-    cam.position.copy(CAM_BASE).add(shake.update(realDt));
+    cam.position.copy(camBase).add(shake.update(realDt));
   }
   if (atmos.active) {
-    atmos.update(dragon.position, heading);
-    atmos.render(lowQuality);
+    atmos.update(dragon.position, heading, humanMode ? 60 : undefined);
+    atmos.render();
   }
   // Bloom only pays off at night, and costs too much on low quality.
   else if (nightMode && !lowQuality) composer.render();
@@ -1639,6 +1847,7 @@ resumeBtn?.addEventListener("click", () => setPaused(false));
 quitBtn?.addEventListener("click", () => {
   if (run) end(false);
 });
+humanBtn?.addEventListener("click", () => setHumanMode(!humanMode));
 freePanel?.querySelectorAll("[data-throttle]").forEach((b) =>
   b.addEventListener("click", () => changeThrottle(+b.dataset.throttle)),
 );
@@ -1694,12 +1903,17 @@ addEventListener("keydown", (e) => {
     if (!run && shopEl.classList.contains("gone")) begin();
     else fire();
   }
-  if (e.code === "KeyF") fire();
+  if (e.code === "KeyF") {
+    if (humanMode) walker.cheer();
+    else fire();
+  }
+  if (e.code === "KeyH") setHumanMode(!humanMode);
   if (e.code === "KeyZ") changeThrottle(-1);
   if (e.code === "KeyX") changeThrottle(1);
   const digit = /^Digit([1-9])$/.exec(e.code);
   if (digit && freeRoam() && ankara.landmarks?.[digit[1] - 1]) teleport(ankara.landmarks[digit[1] - 1].name);
-  if (e.code === "ShiftLeft" || e.code === "ShiftRight") boost();
+  // On foot Shift is held to run, not a boost.
+  if ((e.code === "ShiftLeft" || e.code === "ShiftRight") && !humanMode) boost();
 });
 addEventListener("keyup", (e) => (key[e.code] = false));
 document.addEventListener("visibilitychange", () => {

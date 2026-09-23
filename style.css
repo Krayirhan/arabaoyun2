@@ -31,9 +31,6 @@ html,body{margin:0;height:100%;overflow:hidden;background:#04060b;color:var(--in
 .mission-panel strong{color:var(--ink);font-size:10px;font-weight:400}
 .mission-panel em{color:#ffd36a;font-style:normal;font-size:8px}
 .mission-panel b{color:var(--orange);font-size:9px}
-.pause-btn{position:absolute;top:88px;right:20px;z-index:5;border:1px solid #ffffff24;border-radius:7px;background:#0d1423d9;color:var(--ink);padding:7px 11px;font:700 15px 'Space Mono';cursor:pointer;pointer-events:auto}
-.atmosphere-btn{position:absolute;top:88px;right:65px;z-index:5;border:1px solid #ffffff24;border-radius:7px;background:#0d1423d9;color:#ffd36a;padding:8px 10px;font:700 9px 'Space Mono';cursor:pointer;pointer-events:auto}
-.quality-btn{position:absolute;top:88px;right:125px;z-index:5;border:1px solid #ffffff24;border-radius:7px;background:#0d1423d9;color:var(--cyan);padding:8px 9px;font:700 9px 'Space Mono';cursor:pointer;pointer-events:auto}
 .feedback{position:absolute;left:50%;top:32%;z-index:6;transform:translate(-50%,-50%);color:var(--cyan);font:800 25px 'Barlow Condensed';letter-spacing:.08em;text-shadow:0 3px 12px #000;pointer-events:none;animation:feedback-pop .8s ease-out forwards}
 .feedback.coin{color:#ffd36a}
 .feedback.danger{color:var(--orange)}
@@ -73,12 +70,8 @@ h2{font-size:clamp(42px,7vw,70px)}
 .hud-bottom span:nth-child(2){display:none}
 .mission-panel{top:72px;left:10px;right:10px;padding:6px 8px;font-size:8px}
 .mission-panel strong{font-size:8px;white-space:nowrap}
-.pause-btn{top:72px;right:10px;padding:5px 8px;font-size:12px}
-.atmosphere-btn{top:72px;right:48px;padding:7px 6px;font-size:7px}
-.quality-btn{top:72px;right:91px;padding:7px 5px;font-size:7px}
 }
 
-.sound-btn{position:absolute;top:88px;right:180px;z-index:5;border:1px solid #ffffff24;border-radius:7px;background:#0d1423d9;color:#c3cede;padding:8px 9px;font:700 9px 'Space Mono';cursor:pointer;pointer-events:auto}
 .abilities{position:absolute;right:20px;bottom:52px;z-index:5;display:flex;gap:10px}
 .ability{--fill:100%;position:relative;overflow:hidden;width:78px;height:62px;border:1px solid #ffffff24;border-radius:10px;background:#0d1423d9;color:#8292aa;font:700 15px 'Barlow Condensed';letter-spacing:.1em;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;touch-action:none;user-select:none;-webkit-user-select:none}
 .ability:before{content:'';position:absolute;left:0;right:0;bottom:0;height:var(--fill);background:#5de1e61f;transition:height .1s linear;pointer-events:none}
@@ -120,13 +113,11 @@ h2{font-size:clamp(42px,7vw,70px)}
 .overlay .shop-close{margin:22px 0 30px;background:transparent;border:1px solid #3a4d6a;color:#c3cede}
 
 @media(max-width:600px){
-.sound-btn{top:72px;right:128px;padding:7px 5px;font-size:7px}
 .abilities{right:10px;bottom:40px;gap:8px}
 .ability{width:64px;height:54px;font-size:13px}
 .osm-credit{left:10px;bottom:34px;font-size:7px}
 .shop section{min-width:0}
 .mission-panel{top:124px}
-.pause-btn,.atmosphere-btn,.quality-btn,.sound-btn{top:88px}
 .ability small{display:none}
 .wallet-row{flex-wrap:wrap;justify-content:center}
 }
@@ -148,4 +139,29 @@ h2{font-size:clamp(42px,7vw,70px)}
 .free-spots{flex-direction:row;flex-wrap:wrap}
 .free-panel button{font-size:9px;padding:4px 5px}
 .free-panel small i{display:none}
+}
+.free-panel .human-btn{background:#ff865826;border-color:#ff865888;color:var(--ink);text-align:center;font-size:12px;letter-spacing:.1em}
+.free-panel .human-btn:hover{border-color:var(--orange)}
+
+/* Top-right actions: HUD toggle, settings menu, pause. */
+.top-actions{position:absolute;top:88px;right:20px;z-index:6;display:flex;gap:6px;align-items:flex-start;pointer-events:auto}
+.icon-btn{width:36px;height:34px;border:1px solid #ffffff24;border-radius:7px;background:#0d1423d9;color:var(--ink);font:700 15px 'Space Mono';cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0}
+.icon-btn:hover,.icon-btn.on{border-color:var(--cyan);color:var(--cyan)}
+.settings-menu{position:absolute;top:40px;right:0;display:flex;flex-direction:column;gap:4px;min-width:150px;padding:6px;border:1px solid #ffffff24;border-radius:8px;background:#0d1423f2;backdrop-filter:blur(10px)}
+.settings-menu button{border:1px solid #ffffff17;border-radius:5px;background:#16203380;color:var(--ink);font:700 10px 'Space Mono';letter-spacing:.06em;padding:9px 10px;text-align:left;cursor:pointer}
+.settings-menu button:hover{border-color:var(--cyan)}
+/* Collapsible panels: tap the header. */
+.panel-head{cursor:pointer;pointer-events:auto;user-select:none}
+.panel-head:after{content:' ▾';color:#5f6f86}
+.collapsed .panel-head:after{content:' ▸'}
+.mission-panel.collapsed>:not(.panel-head){display:none}
+.free-panel.collapsed>:not(.panel-head):not(.human-btn){display:none}
+/* Hidden HUD: keep only what is needed to play. */
+.stage.hud-min .brand,.stage.hud-min .stats,.stage.hud-min .mission-panel,.stage.hud-min .free-panel,.stage.hud-min .hud-bottom{display:none}
+.stage.hud-min .hud-top{background:none}
+
+@media(max-width:600px){
+.top-actions{top:88px;right:10px;gap:5px}
+.icon-btn{width:32px;height:30px;font-size:13px}
+.hud-bottom{display:none}
 }

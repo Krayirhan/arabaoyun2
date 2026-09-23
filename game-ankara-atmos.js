@@ -12,6 +12,12 @@ const ANKARA = { lat: 39.9208, lon: 32.8541 };
 // The daytime sky is used when the real sun is too low for a nice flight.
 const MIN_ELEVATION = THREE.MathUtils.degToRad(12);
 const SHADOW_SIZE = 700;
+// The shadow map is only redrawn when its centre moves to a new cell of this
+// size: the city and trees never move, so re-rendering them every frame
+// (~4 ms at 1080p) buys nothing.
+const SHADOW_STEP = 40;
+// Per quality level (0 low, 1 medium, 2 high).
+const SHADOW_MAP = [0, 2048, 4096];
 
 // Solar elevation/azimuth (NOAA approximation, accurate to ~0.5°).
 export function solarPosition(date, lat, lon) {
@@ -106,7 +112,7 @@ export class Atmosphere {
     this.sunDir.copy(sunDirection(pos));
   }
 
-  enable({ lowQuality }) {
+  enable({ quality }) {
     const { renderer, scene, sun, hemi } = this;
     if (!this.saved)
       this.saved = {
@@ -123,7 +129,7 @@ export class Atmosphere {
         },
       };
     this.active = true;
-    this.lowQuality = lowQuality;
+    this.quality = quality;
     this.computeSun();
     this.sky.material.uniforms.sunPosition.value.copy(this.sunDir);
     scene.add(this.sky);
@@ -150,10 +156,13 @@ export class Atmosphere {
     // Aerial perspective: fog takes the colour of the hazy horizon.
     scene.fog.color.set(0xb8cadb);
     // One large shadow map following the camera: ~17 cm per texel over
-    // 700 m, and the fog hides everything beyond it.
-    sun.castShadow = !lowQuality && renderer.shadowMap.enabled;
+    // 700 m, and the fog hides everything beyond it. Cached between moves.
+    sun.castShadow = quality > 0 && renderer.shadowMap.enabled;
+    sun.shadow.autoUpdate = false;
+    sun.shadow.needsUpdate = true;
+    this.shadowKey = "";
     const cam = sun.shadow.camera;
-    const size = lowQuality ? 2048 : 4096;
+    const size = SHADOW_MAP[quality] || 2048;
     if (sun.shadow.mapSize.x !== size) {
       sun.shadow.mapSize.set(size, size);
       sun.shadow.map?.dispose();
@@ -166,7 +175,10 @@ export class Atmosphere {
     cam.updateProjectionMatrix();
     sun.shadow.bias = -0.0004;
     sun.shadow.normalBias = 0.6;
-    this.setupComposer();
+    // Post-processing (MSAA target, GTAO, grade) only on high quality; the
+    // others render straight to the canvas with the renderer's own MSAA.
+    if (quality === 2) this.setupComposer();
+    this.updateGtao();
   }
 
   disable() {
@@ -190,6 +202,8 @@ export class Atmosphere {
     cam.updateProjectionMatrix();
     sun.shadow.bias = saved.shadow.bias;
     sun.shadow.normalBias = saved.shadow.normalBias;
+    // The endless city moves every frame, so its shadows must too.
+    sun.shadow.autoUpdate = true;
     this.saved = null;
   }
 
@@ -206,7 +220,7 @@ export class Atmosphere {
       sun.color.set(0x8aa2d8);
       hemi.intensity = 0.5;
       this.renderer.toneMappingExposure = 0.9;
-    } else this.enable({ lowQuality: this.lowQuality });
+    } else this.enable({ quality: this.quality });
     if (this.bloom) this.bloom.enabled = night;
   }
 
@@ -251,29 +265,40 @@ export class Atmosphere {
     if (!this.composer) return;
     this.composer.setPixelRatio(this.renderer.getPixelRatio());
     this.composer.setSize(w, h);
-    // GTAO costs ~3 ms per megapixel here; past ~2.2 MP (e.g. 1080p on a
-    // HiDPI screen) it would eat the frame budget, so skip it there.
-    const pr = this.renderer.getPixelRatio();
-    this.gtao.enabled = w * h * pr * pr <= 2.2e6;
+    this.updateGtao();
+  }
+
+  // GTAO measured ~10 ms at 1080p, the single most expensive effect; keep
+  // it to high quality and at most ~1.6 MP of actual pixels.
+  updateGtao() {
+    if (!this.gtao) return;
+    const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
+    this.gtao.enabled = this.quality === 2 && size.x * size.y <= 1.6e6;
   }
 
   // Keeps the sky around the camera and the shadow box ahead of it.
-  update(dragonPos, heading) {
+  // lead: how far ahead of the player the shadowed area is centred.
+  update(dragonPos, heading, lead = SHADOW_SIZE * 0.3) {
     if (!this.active) return;
     this.camera.getWorldPosition(this.sky.position);
     this.forward.set(-Math.sin(heading), 0, -Math.cos(heading));
-    this.focus.copy(dragonPos).addScaledVector(this.forward, SHADOW_SIZE * 0.3);
-    this.focus.y = Math.max(0, dragonPos.y - 60);
-    // Snap to shadow texels so edges don't shimmer while flying.
-    const texel = SHADOW_SIZE / this.sun.shadow.mapSize.x;
-    this.focus.x = Math.round(this.focus.x / texel) * texel;
-    this.focus.z = Math.round(this.focus.z / texel) * texel;
+    this.focus.copy(dragonPos).addScaledVector(this.forward, lead);
+    // Snap the shadow box to a coarse grid and only redraw the (static)
+    // shadow map when it moves to another cell.
+    this.focus.x = Math.round(this.focus.x / SHADOW_STEP) * SHADOW_STEP;
+    this.focus.z = Math.round(this.focus.z / SHADOW_STEP) * SHADOW_STEP;
+    this.focus.y = Math.max(0, Math.round((dragonPos.y - 60) / SHADOW_STEP) * SHADOW_STEP);
+    const key = `${this.focus.x},${this.focus.y},${this.focus.z}`;
+    if (key !== this.shadowKey) {
+      this.shadowKey = key;
+      this.sun.shadow.needsUpdate = true;
+    }
     this.sun.position.copy(this.focus).addScaledVector(this.sunDir, 1200);
     this.sun.target.position.copy(this.focus);
   }
 
-  render(lowQuality) {
-    if (lowQuality || !this.composer) this.renderer.render(this.scene, this.camera);
+  render() {
+    if (this.quality < 2 || !this.composer) this.renderer.render(this.scene, this.camera);
     else this.composer.render();
   }
 }

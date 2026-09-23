@@ -246,6 +246,9 @@ export function buildTrees(group, chunks) {
     tint = new THREE.Color();
   let total = 0;
   const treeMeshes = [];
+  // [x, y, z, scale, conifer] per tree on a 10 m grid, for walking and the
+  // on-foot camera.
+  const grid = new Map();
   for (const data of chunks) {
     const n = data.length / 6;
     const counts = [0, 0];
@@ -260,6 +263,9 @@ export function buildTrees(group, chunks) {
     });
     for (let i = 0; i < n; i++) {
       const [x, y, z, scale, t, kind] = data.subarray(i * 6, i * 6 + 6);
+      const cell = `${Math.floor(x / 10)},${Math.floor(z / 10)}`;
+      if (!grid.has(cell)) grid.set(cell, []);
+      grid.get(cell).push([x, y - 0.2, z, scale, kind]);
       const mesh = meshes[kind];
       q.setFromAxisAngle(up, t * Math.PI * 2);
       p.set(x, y - 0.2, z);
@@ -280,16 +286,15 @@ export function buildTrees(group, chunks) {
       total += mesh.count;
     }
   }
-  return { total, meshes: treeMeshes };
+  return { total, meshes: treeMeshes, grid };
 }
 
-// Tree chunks beyond this are hidden: they sit deep in the fog anyway, and
-// trees are most of the triangle budget.
-const TREE_VIEW = 650;
-export function cullTrees(meshes, cameraPos) {
+// Tree chunks beyond viewDistance are hidden: they sit deep in the fog
+// anyway, and trees are most of the triangle budget.
+export function cullTrees(meshes, cameraPos, viewDistance = 650) {
   for (const m of meshes) {
     const s = m.boundingSphere;
-    m.visible = s.center.distanceTo(cameraPos) - s.radius < TREE_VIEW;
+    m.visible = s.center.distanceTo(cameraPos) - s.radius < viewDistance;
   }
 }
 
@@ -316,7 +321,9 @@ export class Traffic {
       tpl.traverse((o) => {
         if (!o.isMesh) return;
         const mesh = new THREE.InstancedMesh(o.geometry, o.material, perModel);
-        mesh.castShadow = true;
+        // The shadow map is cached while the player stays in one area, so
+        // moving cars would leave frozen shadows behind: they cast none.
+        mesh.castShadow = false;
         mesh.userData.noAO = true;
         mesh.frustumCulled = false;
         // Real cars are ~4.5 m long; the templates are normalised to 6 m.

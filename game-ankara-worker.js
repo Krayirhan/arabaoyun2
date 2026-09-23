@@ -610,11 +610,16 @@ if (isWorker)
 
       const traffic = [];
       const streetTrees = [];
+      // [ax, az, bx, bz, halfWidth, sidewalk] per road segment, so someone
+      // walking knows when they are on the raised asphalt or sidewalk.
+      const surface = [];
       for (const [wq, flat, cls, oneway] of data.roads) {
         const pts = flat.map((v) => v / q);
         const halfWidth = wq / q / 2;
         // Street trees stand on the sidewalk edge, just outside this reach.
         markRoad(pts, halfWidth + 1.2);
+        for (let i = 0; i + 3 < pts.length; i += 2)
+          surface.push(pts[i], pts[i + 1], pts[i + 2], pts[i + 3], halfWidth, cls <= 3 ? 3 : 1.8);
         const r = road(chunkAt(pts[0], pts[1]), hm, pts, halfWidth, cls, oneway);
         if (!r) continue;
         if (cls <= 3) traffic.push({ path: r.path, oneway: !!oneway, halfWidth });
@@ -687,12 +692,15 @@ if (isWorker)
       const trees = [...treeChunks.values()].map((list) => Float32Array.from(list));
       trees.forEach((t) => transfer.push(t.buffer));
       traffic.forEach((t) => transfer.push(t.path.buffer));
+      const surfaceSegments = Float32Array.from(surface);
+      transfer.push(surfaceSegments.buffer);
       for (const c of colliders) for (const r of c.rings) transfer.push(r.buffer);
       self.postMessage(
         {
           chunks: out,
           trees,
           traffic,
+          surfaceSegments,
           colliders,
           heightmap: { x0: hm.x0, z0: hm.z0, cell: hm.cell, w: hm.w, h: hm.h, heights: hm.heights },
           areas: data.areas.map(([cls, rings]) => [cls, rings.map((r) => r.map((v) => v / q))]),

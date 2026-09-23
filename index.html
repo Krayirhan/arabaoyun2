@@ -47,15 +47,21 @@
         </div>
       </div>
       <div class="mission-panel">
-        <small>GÜNLÜK GÖREVLER</small>
+        <small class="panel-head" data-collapse="mission">GÜNLÜK GÖREVLER</small>
         <strong id="mission">COIN 0/10 · UÇUŞ 0/500 · GEÇİŞ 0/3</strong>
         <em id="powerStatus">GÜÇLENDİRİCİ YOK</em>
         <b id="combo">COMBO x1</b>
       </div>
-      <button id="pauseBtn" class="pause-btn" aria-label="Oyunu duraklat">Ⅱ</button>
-      <button id="atmosphereBtn" class="atmosphere-btn">GECE</button>
-      <button id="qualityBtn" class="quality-btn">KALİTE</button>
-      <button id="soundBtn" class="sound-btn">SES</button>
+      <div class="top-actions">
+        <button id="hudBtn" class="icon-btn" aria-label="Arayüzü gizle / göster" title="Arayüz (U)">👁</button>
+        <button id="settingsBtn" class="icon-btn" aria-label="Ayarlar" title="Ayarlar">⚙</button>
+        <button id="pauseBtn" class="icon-btn pause-btn" aria-label="Oyunu duraklat">Ⅱ</button>
+        <div id="settingsMenu" class="settings-menu gone">
+          <button id="qualityBtn">KALİTE</button>
+          <button id="atmosphereBtn">GECE</button>
+          <button id="soundBtn">SES</button>
+        </div>
+      </div>
       <div class="abilities">
         <button id="fireBtn" class="ability ready" aria-label="Ateş püskür">
           <b>ATEŞ</b><small>F / BOŞLUK</small>
@@ -68,7 +74,8 @@
         Harita © OpenStreetMap katkıcıları (ODbL) · Arazi: AWS Terrain Tiles
       </div>
       <div id="freePanel" class="free-panel gone">
-        <small>IŞINLAN <i>1–7</i></small>
+        <button id="humanBtn" class="human-btn"><b>H</b>İNSAN MODU</button>
+        <small class="panel-head" data-collapse="free">IŞINLAN <i>1–7</i></small>
         <div class="free-spots"></div>
         <small>HIZ <i>Z / X</i></small>
         <div class="free-speed">

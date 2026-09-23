@@ -103,8 +103,25 @@ export class Ankara {
     const trees = buildTrees(this.group, data.trees);
     this.treeCount = trees.total;
     this.treeMeshes = trees.meshes;
+    this.treeGrid = trees.grid;
     if (carTemplates.length && data.traffic.length) this.traffic = new Traffic(this.group, data.traffic, carTemplates, carCount);
     this.colliders = data.colliders;
+    // Road surface lookup for walking: segments bucketed on a 40 m grid.
+    this.surfaceGrid = new Map();
+    const seg = data.surfaceSegments;
+    for (let i = 0; i < seg.length; i += 6) {
+      const reach = seg[i + 4] + seg[i + 5];
+      const x0 = Math.min(seg[i], seg[i + 2]) - reach,
+        x1 = Math.max(seg[i], seg[i + 2]) + reach,
+        z0 = Math.min(seg[i + 1], seg[i + 3]) - reach,
+        z1 = Math.max(seg[i + 1], seg[i + 3]) + reach;
+      for (let gx = Math.floor(x0 / 40); gx <= Math.floor(x1 / 40); gx++)
+        for (let gz = Math.floor(z0 / 40); gz <= Math.floor(z1 / 40); gz++) {
+          const key = `${gx},${gz}`;
+          if (!this.surfaceGrid.has(key)) this.surfaceGrid.set(key, []);
+          this.surfaceGrid.get(key).push(seg.subarray(i, i + 6));
+        }
+    }
     this.colliders.forEach((b, id) => {
       for (let gx = Math.floor(b.bx0 / GRID); gx <= Math.floor(b.bx1 / GRID); gx++)
         for (let gz = Math.floor(b.bz0 / GRID); gz <= Math.floor(b.bz1 / GRID); gz++) {
@@ -130,6 +147,69 @@ export class Ankara {
 
   groundAt(x, z) {
     return groundAt(this.hm, x, z);
+  }
+
+  // Height a walker stands at: terrain, plus the raised asphalt (0.48 m) or
+  // sidewalk (0.4 m) the worker drapes over it (see road() there).
+  surfaceAt(x, z) {
+    let lift = 0;
+    for (const [ax, az, bx, bz, hw, walk] of this.surfaceGrid.get(`${Math.floor(x / 40)},${Math.floor(z / 40)}`) || []) {
+      const dx = bx - ax,
+        dz = bz - az;
+      const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz || 1)));
+      const d = Math.hypot(x - ax - t * dx, z - az - t * dz);
+      if (d < hw) return this.groundAt(x, z) + 0.48;
+      if (d < hw + walk) lift = 0.4;
+    }
+    return this.groundAt(x, z) + lift;
+  }
+
+  // Trees near (x, z), from the 10 m tree grid.
+  *treesNear(x, z) {
+    const gx = Math.floor(x / 10),
+      gz = Math.floor(z / 10);
+    for (let dx = -1; dx <= 1; dx++)
+      for (let dz = -1; dz <= 1; dz++) yield* this.treeGrid?.get(`${gx + dx},${gz + dz}`) || [];
+  }
+
+  // A tree trunk within radius of (x, z): walkers can't pass through them.
+  trunkAt(x, z, radius) {
+    for (const [tx, , tz, s] of this.treesNear(x, z)) if (Math.hypot(tx - x, tz - z) < radius + 0.35 * s) return true;
+    return false;
+  }
+
+  // True if a point is inside a building, trunk or tree crown; used to keep
+  // the on-foot camera from ending up inside things.
+  occludes(p) {
+    if (this.collides(p, 0.25)) return true;
+    for (const [tx, ty, tz, s, conifer] of this.treesNear(p.x, p.z)) {
+      const dh = Math.hypot(tx - p.x, tz - p.z);
+      const cy = ty + (conifer ? 4.6 : 5.2) * s;
+      if (Math.hypot(dh, (p.y - cy) * (conifer ? 0.6 : 1)) < 2.7 * s) return true;
+      if (dh < 0.5 * s && p.y < cy) return true;
+    }
+    return false;
+  }
+
+  // Nearest spot within ~200 m where a person fits between buildings,
+  // searched in a square spiral around (x, z).
+  findWalkable(x, z, radius = 0.6) {
+    const p = new THREE.Vector3();
+    const free = (px, pz) => {
+      p.set(px, this.groundAt(px, pz) + 1, pz);
+      return !this.collides(p, radius + 0.8) && !this.trunkAt(px, pz, radius + 1.5);
+    };
+    if (free(x, z)) return { x, z };
+    for (let ring = 1; ring <= 50; ring++)
+      for (let i = -ring; i <= ring; i++)
+        for (const [dx, dz] of [
+          [i, -ring],
+          [i, ring],
+          [-ring, i],
+          [ring, i],
+        ])
+          if (free(x + dx * 4, z + dz * 4)) return { x: x + dx * 4, z: z + dz * 4 };
+    return { x, z };
   }
 
   buildTerrain(areas, textureSize) {
@@ -392,10 +472,10 @@ export class Ankara {
   }
 
   // Ambient life: traffic and birds. Runs every frame while flying.
-  animate(dt, time, cameraPos) {
+  animate(dt, time, cameraPos, treeView) {
     this.traffic?.update(dt);
     this.birds?.update(time);
-    if (cameraPos && this.treeMeshes) cullTrees(this.treeMeshes, cameraPos);
+    if (cameraPos && this.treeMeshes) cullTrees(this.treeMeshes, cameraPos, treeView);
   }
 
   setVisible(value) {
